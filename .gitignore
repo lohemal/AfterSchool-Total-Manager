@@ -1,0 +1,27 @@
+node_modules/
+dist/
+dist-ssr/
+*.local
+.DS_Store
+
+# Rust / Tauri
+src-tauri/target/
+src-tauri/gen/
+
+# 개발용 로컬 DB
+*.db
+*.db-shm
+*.db-wal
+
+# 업데이터 서명 키 (절대 커밋 금지)
+*.key
+*.key.pub
+.tauri/
+
+# 내보낸 Excel / 백업
+exports/
+backups/
+
+.vscode/*
+!.vscode/extensions.json
+.idea/

@@ -1,0 +1,52 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "방과후 통합 매니저",
+  "mainBinaryName": "afterschool",
+  "version": "0.1.0",
+  "identifier": "kr.school.afterschool",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "방과후 통합 매니저",
+        "width": 1440,
+        "height": 900,
+        "minWidth": 1180,
+        "minHeight": 720,
+        "resizable": true,
+        "center": true,
+        "decorations": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: asset: http://asset.localhost"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.ico"
+    ],
+    "windows": {
+      "nsis": {
+        "languages": ["Korean"],
+        "displayLanguageSelector": false,
+        "installMode": "currentUser"
+      }
+    },
+    "publisher": "lohemal",
+    "copyright": "Copyright © 2026 lohemal",
+    "shortDescription": "방과후학교 수강·정산·품의 통합 관리",
+    "longDescription": "전교생 학생정보를 바탕으로 방과후 수강생과 수강료를 관리하고, 방과후 이용권·자유수강권 지원금을 차감해 수익자 부담금과 부서별 품의자료를 만듭니다. 모든 자료는 이 컴퓨터에만 저장됩니다.",
+    "category": "Education"
+  }
+}

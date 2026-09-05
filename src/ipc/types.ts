@@ -1,0 +1,188 @@
+/** Rust `model.rs`와 짝을 이루는 타입. 한쪽을 고치면 다른 쪽도 고친다. */
+
+export type ProgramCode = 'VOUCHER' | 'FREE_VOUCHER'
+
+export interface Year {
+  id: number
+  year: number
+  name: string
+  startDate: string
+  endDate: string
+  dataVersion: number
+  isCurrent: boolean
+}
+
+export interface Workspace {
+  id: number
+  yearId: number
+  name: string
+  startDate: string
+  endDate: string
+  dataVersion: number
+  isCurrent: boolean
+  note: string
+  departmentCount: number
+  enrollmentCount: number
+}
+
+export interface WorkspaceInput {
+  name: string
+  startDate: string
+  endDate: string
+  note?: string
+}
+
+export interface Student {
+  id: number
+  grade: number
+  classNo: number
+  studentNo: number
+  name: string
+  note: string
+  programs: ProgramCode[]
+}
+
+export interface StudentInput {
+  grade: number
+  classNo: number
+  studentNo: number
+  name: string
+  note?: string
+}
+
+export interface StudentFilter {
+  workspaceId?: number | null
+  grade?: number | null
+  classNo?: number | null
+  studentNo?: number | null
+  name?: string | null
+  /** `VOUCHER` | `FREE_VOUCHER` | `BOTH` | `NONE` */
+  program?: string | null
+  query?: string | null
+}
+
+export interface Eligibility {
+  id: number
+  studentId: number
+  program: ProgramCode
+  validFrom: string | null
+  validTo: string | null
+  source: 'MANUAL' | 'EXCEL'
+  note: string
+  grade: number
+  classNo: number
+  studentNo: number
+  name: string
+  gradeMismatch: boolean
+}
+
+export interface EligibilityInput {
+  studentId: number
+  program: ProgramCode
+  validFrom?: string | null
+  validTo?: string | null
+  note?: string
+}
+
+export interface EligibilityView {
+  rows: Eligibility[]
+  targetGradeText: string
+  mismatchCount: number
+}
+
+export interface CostItem {
+  code: string
+  name: string
+  sortOrder: number
+}
+
+export interface Fee {
+  itemCode: string
+  amount: number
+}
+
+export interface Department {
+  id: number
+  name: string
+  className: string
+  teacher: string
+  days: string
+  note: string
+  fees: Fee[]
+  total: number
+  enrollmentCount: number
+}
+
+export interface DepartmentInput {
+  name: string
+  className?: string
+  teacher?: string
+  days?: string
+  note?: string
+  fees: Fee[]
+}
+
+export interface Period {
+  id?: number | null
+  name: string
+  startDate: string
+  endDate: string
+  limitAmount: number
+  seq: number
+}
+
+export interface Policy {
+  id: number
+  program: ProgramCode
+  annualLimit: number
+  carryover: boolean
+  targetGrades: string
+  labelFund: string
+  labelOver: string
+  periods: Period[]
+}
+
+export interface PolicyView {
+  policy: Policy
+  notice: string | null
+}
+
+export interface Bootstrap {
+  years: Year[]
+  currentYear: Year | null
+  workspaces: Workspace[]
+  currentWorkspace: Workspace | null
+  costItems: CostItem[]
+  dbPath: string
+}
+
+export interface RowIssue {
+  row: number
+  cells: string[]
+  reason: string
+}
+
+export interface ImportPreview {
+  token: string
+  kind: string
+  fileName: string
+  headers: string[]
+  total: number
+  okCount: number
+  errors: RowIssue[]
+  warnings: RowIssue[]
+  preview: string[][]
+}
+
+export interface ImportResult {
+  added: number
+  updated: number
+}
+
+export interface ExportResult {
+  path: string
+  name: string
+  rows: number
+}
+
+export type ImportKind = 'students' | 'eligibility' | 'departments'
