@@ -194,6 +194,33 @@ fn 옛_저장소_이름이_남아_있지_않다() {
 }
 
 #[test]
+fn 서명_비밀번호를_빈_문자열로_넘긴다() {
+    // 서명 키는 비밀번호를 걸지 않았어도 scrypt 로 감싸여 있다(kdf_alg="Sc").
+    // TAURI_SIGNING_PRIVATE_KEY_PASSWORD 가 아예 없으면 tauri 가 비밀번호를
+    // 물으며 멈추고, 설치파일은 나오는데 .sig 만 빠진다. 실제로 재현했다.
+    //
+    // GitHub 은 빈 값 시크릿을 저장할 수 없으므로 시크릿에서 받지 않고
+    // bash 한 줄 대입으로 넘긴다. env: 에 "" 로 적으면 Windows 에서 변수가
+    // 통째로 사라질 수 있어 같은 멈춤으로 돌아간다.
+    let wf = include_str!("../../.github/workflows/release.yml");
+    let settings: String = wf
+        .lines()
+        .filter(|l| !l.trim_start().starts_with('#'))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    assert!(
+        settings.contains(r#"TAURI_SIGNING_PRIVATE_KEY_PASSWORD="" npm run app:build"#),
+        "서명 비밀번호를 빈 문자열로 넘기지 않습니다. \
+         이 변수가 없으면 .sig 없이 빌드가 멈춥니다."
+    );
+    assert!(
+        !settings.contains("TAURI_SIGNING_PRIVATE_KEY_PASSWORD: "),
+        "빈 값 환경변수는 Windows 에서 사라질 수 있으므로 env: 로 넘기면 안 됩니다."
+    );
+}
+
+#[test]
 fn 릴리스_첨부_파일_이름이_약속과_같다() {
     // 사용자와 약속한 이름이다. 바뀌면 latest.json의 주소도 함께 어긋난다.
     let wf = include_str!("../../.github/workflows/release.yml");

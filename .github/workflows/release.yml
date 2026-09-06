@@ -62,11 +62,34 @@ jobs:
       - name: 전체 테스트
         run: npm run check
 
+      # 필요한 시크릿은 TAURI_SIGNING_PRIVATE_KEY 하나뿐이다.
+      #
+      # ## 비밀번호를 빈 문자열로 반드시 넘겨야 한다
+      #
+      # 서명 키는 비밀번호를 걸지 않았어도 scrypt 로 감싸여 있다(kdf_alg="Sc").
+      # 그래서 복호화할 때 비밀번호가 필요하고, 빈 문자열이 그 비밀번호다.
+      # 이 환경변수가 **아예 없으면** tauri 가
+      #   Info Decrypting updater signing key, expect a prompt for password
+      # 를 찍고 입력을 기다린다. 설치파일은 멀쩡히 나오는데 .sig 만 빠진다.
+      # 실제로 재현해서 확인했다.
+      #
+      # GitHub 은 빈 값 시크릿을 저장할 수 없으므로 시크릿에서 받지 않는다.
+      # 그렇다고 `env:` 에 "" 로 적으면 안 된다 — Windows 에서는 빈 값 환경변수가
+      # "없는 변수"로 사라질 수 있어서 위의 멈춤으로 되돌아간다. 그래서 bash 의
+      # 한 줄 대입으로 넘긴다(내 PC 에서 서명이 되는 것을 확인한 방식 그대로다).
+      #
+      # 나중에 비밀번호 있는 키로 바꾸면 아래 "" 자리에
+      # ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }} 를 넣으면 된다.
       - name: 설치파일 만들기·서명
+        shell: bash
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-        run: npm run app:build
+        run: |
+          if [ -z "$TAURI_SIGNING_PRIVATE_KEY" ]; then
+            echo "TAURI_SIGNING_PRIVATE_KEY 시크릿이 비어 있습니다. 저장소 Settings → Secrets 를 확인하세요."
+            exit 1
+          fi
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD="" npm run app:build
 
       - name: 파일 이름 정리·latest.json 만들기
         shell: pwsh
