@@ -26,7 +26,7 @@
 | Excel | 업로드 양식 받기 · 업로드(미리보기 검증) · 내려받기 · 오류 목록 내려받기 |
 | 백업·복원·업데이트 | 수동/자동 백업, 복원(구버전 자료구조 자동 갱신), 업데이트 확인·설치, 로그 폴더 |
 
-다섯 단계를 모두 마쳤습니다. 남은 것은 앱 아이콘 교체와 첫 Release 발행입니다.
+다섯 단계를 모두 마쳤습니다. 남은 것은 첫 Release 발행입니다.
 
 **지원금 사용액과 잔액은 정산이 최신일 때만 표시합니다.** 해당없음 · 정산 전 ·
 재정산 필요 · 최신을 분명히 갈라 쓰며, 낡은 정산의 숫자를 최신처럼 보여 주지 않습니다.
@@ -90,9 +90,10 @@ src-tauri/
 
 ## 남은 일
 
-- [ ] 앱 아이콘 교체 — `src-tauri/icons/README.md` 참고 (1024×1024 PNG 하나 준비)
-- [ ] GitHub 저장소 `lohemal/AfterSchool-Total-Manager` 만들기
-- [ ] 서명 키를 저장소 Secrets에 넣기 — `docs/02-배포.md` 5장
+- [x] 앱 아이콘 교체 (2026-09-06) — 원본은 `src-tauri/icons/source.png`
+- [x] GitHub 저장소 `lohemal/AfterSchool-Total-Manager` 만들고 `main` 푸시
+- [x] 서명 키 Secret `TAURI_SIGNING_PRIVATE_KEY` 등록
+      (비밀번호 Secret은 등록하지 않는다 — `docs/02-배포.md` 5장)
 - [ ] 첫 Release 발행 (`git tag v0.1.0` 푸시) — `docs/02-배포.md` 7장
 - [ ] 실제 구버전 → 신버전 업데이트 시험 (Release가 두 개 있어야 합니다) —
       `docs/02-배포.md` 11장 ③
