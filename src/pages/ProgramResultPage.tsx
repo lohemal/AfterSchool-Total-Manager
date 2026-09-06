@@ -13,9 +13,11 @@ import { useQuery } from '@tanstack/react-query'
 import { useMemo, useState } from 'react'
 
 import { cmp, DataTable, type Column } from '@/components/DataTable'
+import { ExportButton } from '@/components/ExportButton'
+import { StudentAllocModal } from '@/components/StudentAllocModal'
 import { Button, Card, Empty, Field, Notice, Search } from '@/components/ui'
 import { api } from '@/ipc/api'
-import type { ProgramCode, ProgramRow } from '@/ipc/types'
+import type { ProgramCode, ProgramRow, SettleExportKind } from '@/ipc/types'
 import { won } from '@/lib/format'
 import { useApp } from '@/lib/useApp'
 
@@ -25,6 +27,7 @@ export function VoucherPage() {
   return (
     <ProgramResult
       program="VOUCHER"
+      exportKind="voucher"
       title="방과후 이용권"
       hint="지원받은 금액과 한도를 넘어 학부모 부담이 된 금액을 함께 봅니다."
       showOver
@@ -36,6 +39,7 @@ export function FreeVoucherPage() {
   return (
     <ProgramResult
       program="FREE_VOUCHER"
+      exportKind="free_voucher"
       title="자유수강권"
       hint="지원한도를 넘은 금액은 여기 나오지 않고 수익자 탭으로 갑니다."
     />
@@ -44,11 +48,13 @@ export function FreeVoucherPage() {
 
 function ProgramResult({
   program,
+  exportKind,
   title,
   hint,
   showOver,
 }: {
   program: ProgramCode
+  exportKind: SettleExportKind
   title: string
   hint: string
   showOver?: boolean
@@ -57,7 +63,13 @@ function ProgramResult({
   const items = app.boot.costItems
   const wsId = app.workspaceId
   const [query, setQuery] = useState('')
+  const [detail, setDetail] = useState<ProgramRow | null>(null)
 
+  const status = useQuery({
+    queryKey: ['settle-status', wsId],
+    queryFn: () => api.settlementStatus(wsId!),
+    enabled: wsId !== null,
+  })
   const list = useQuery({
     queryKey: ['settle-program', wsId, program],
     queryFn: () => api.settlementProgram(wsId!, program),
@@ -192,6 +204,13 @@ function ProgramResult({
             <b>{app.workspace?.name}</b> — {hint}
           </p>
         </div>
+        <div className="page__actions">
+          <ExportButton
+            kind={exportKind}
+            workspaceId={wsId}
+            fresh={status.data?.state === 'FRESH'}
+          />
+        </div>
       </div>
 
       <SettleGuard>
@@ -220,11 +239,12 @@ function ProgramResult({
             rows={rows}
             columns={columns}
             getId={(r) => r.studentId}
+            onRowClick={(r) => setDetail(r)}
             empty={list.isLoading ? '불러오는 중…' : `${title} 대상 자료가 없습니다.`}
             foot={
               <>
                 <span>
-                  모두 <b>{rows.length}</b>명
+                  모두 <b>{rows.length}</b>명 — 줄을 누르면 부서별 상세가 열립니다
                 </span>
                 <span className="toolbar__spacer" />
                 <span>
@@ -240,6 +260,15 @@ function ProgramResult({
           />
         </Card>
       </SettleGuard>
+
+      {detail && (
+        <StudentAllocModal
+          workspaceId={wsId}
+          studentId={detail.studentId}
+          title={`학년 반 번 `}
+          onClose={() => setDetail(null)}
+        />
+      )}
     </div>
   )
 }

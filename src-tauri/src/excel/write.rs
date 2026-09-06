@@ -18,6 +18,9 @@ pub struct Styles {
     pub text: Format,
     pub money: Format,
     pub sample: Format,
+    /// 마지막 합계 행 — 굵게, 연한 남색 바탕
+    pub total_text: Format,
+    pub total_money: Format,
 }
 
 pub fn styles() -> Styles {
@@ -49,6 +52,21 @@ pub fn styles() -> Styles {
             .set_italic()
             .set_border(FormatBorder::Thin)
             .set_border_color(border),
+        total_text: Format::new()
+            .set_bold()
+            .set_background_color(Color::RGB(0x00F3F7FD))
+            .set_align(FormatAlign::Center)
+            .set_align(FormatAlign::VerticalCenter)
+            .set_border(FormatBorder::Thin)
+            .set_border_color(border),
+        total_money: Format::new()
+            .set_bold()
+            .set_background_color(Color::RGB(0x00F3F7FD))
+            .set_num_format("#,##0")
+            .set_align(FormatAlign::Right)
+            .set_align(FormatAlign::VerticalCenter)
+            .set_border(FormatBorder::Thin)
+            .set_border_color(border),
     }
 }
 
@@ -64,6 +82,27 @@ pub fn write_sheet(
     money_cols: &[usize],
     sample: Option<&[&str]>,
 ) -> AppResult<PathBuf> {
+    let widths = vec![DEFAULT_WIDTH; headers.len()];
+    write_sheet_sized(
+        path, sheet_name, headers, rows, money_cols, sample, &widths, false,
+    )
+}
+
+/// 열 너비를 따로 정하고, 마지막 줄을 합계 행으로 강조할 수 있는 판.
+///
+/// 행정자료는 열이 많고 이름·부서명이 잘리면 곤란하므로 너비를 열마다 준다.
+/// **금액은 언제나 숫자 셀로 쓴다** — 문자열로 쓰면 Excel에서 합계가 안 된다.
+#[allow(clippy::too_many_arguments)]
+pub fn write_sheet_sized(
+    path: &Path,
+    sheet_name: &str,
+    headers: &[&str],
+    rows: &[Vec<String>],
+    money_cols: &[usize],
+    sample: Option<&[&str]>,
+    widths: &[f64],
+    bold_last_row: bool,
+) -> AppResult<PathBuf> {
     let mut book = Workbook::new();
     let sheet = book.add_worksheet();
     sheet.set_name(sheet_name)?;
@@ -71,7 +110,8 @@ pub fn write_sheet(
 
     for (c, h) in headers.iter().enumerate() {
         sheet.write_string_with_format(0, c as u16, *h, &s.header)?;
-        sheet.set_column_width(c as u16, DEFAULT_WIDTH)?;
+        let w = widths.get(c).copied().unwrap_or(DEFAULT_WIDTH);
+        sheet.set_column_width(c as u16, w)?;
     }
     sheet.set_row_height(0, 22)?;
 
@@ -83,13 +123,17 @@ pub fn write_sheet(
         r += 1;
     }
 
-    for row in rows {
+    let last = rows.len().saturating_sub(1);
+    for (i, row) in rows.iter().enumerate() {
+        let total_row = bold_last_row && i == last;
         for (c, v) in row.iter().enumerate() {
             if money_cols.contains(&c) {
                 let n = v.replace(',', "").trim().parse::<f64>().unwrap_or(0.0);
-                sheet.write_number_with_format(r, c as u16, n, &s.money)?;
+                let f = if total_row { &s.total_money } else { &s.money };
+                sheet.write_number_with_format(r, c as u16, n, f)?;
             } else {
-                sheet.write_string_with_format(r, c as u16, v, &s.text)?;
+                let f = if total_row { &s.total_text } else { &s.text };
+                sheet.write_string_with_format(r, c as u16, v, f)?;
             }
         }
         r += 1;

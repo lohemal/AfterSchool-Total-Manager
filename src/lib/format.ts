@@ -63,3 +63,32 @@ export function currentSchoolYear(): number {
   const d = new Date()
   return d.getMonth() + 1 >= 3 ? d.getFullYear() : d.getFullYear() - 1
 }
+
+/** 내부 재원 코드를 사람이 읽는 말로. 화면에 코드를 그대로 쓰지 않는다. */
+export function fundLabel(code: string): string {
+  switch (code) {
+    case 'SELF_PAY':
+      return '수익자 부담금'
+    case 'VOUCHER':
+      return '이용권 지원'
+    case 'VOUCHER_OVER':
+      return '이용권 초과금'
+    case 'FREE_VOUCHER':
+      return '자유수강권 지원'
+    default:
+      return '기타'
+  }
+}
+
+export function fundTone(code: string): string {
+  switch (code) {
+    case 'VOUCHER':
+      return 'tag--voucher'
+    case 'FREE_VOUCHER':
+      return 'tag--free'
+    case 'VOUCHER_OVER':
+      return 'tag--warn'
+    default:
+      return 'tag--plain'
+  }
+}

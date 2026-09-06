@@ -440,3 +440,54 @@ export interface GrantInput {
   amount: number
   reason?: string
 }
+
+// ─────────────────────────────────────────────── Phase 4 — 행정자료
+
+export interface ProposalColumn {
+  /** 안정된 재원 코드 */
+  fund: string
+  /** 그 학년도의 표시 이름 (`3학년 지원금`) */
+  label: string
+}
+
+export interface ProposalRow {
+  departmentId: number
+  deptLabel: string
+  /** columns 차례대로의 금액 */
+  amounts: number[]
+  total: number
+}
+
+export interface Proposal {
+  yearName: string
+  workspaceName: string
+  itemLabel: string
+  itemCodes: string[]
+  columns: ProposalColumn[]
+  rows: ProposalRow[]
+  total: ProposalRow
+  settlementTotal: number
+  balanced: boolean
+  settledAt: string
+}
+
+export interface ProposalKind {
+  key: string
+  label: string
+  itemCodes: string[]
+}
+
+export interface StudentAllocRow {
+  departmentId: number
+  deptLabel: string
+  itemCode: string
+  itemName: string
+  fund: string
+  fundLabel: string
+  origin: string
+  originLabel: string
+  amount: number
+}
+
+/** 정산 결과 Excel 종류 */
+export type SettleExportKind = 'self_pay' | 'voucher' | 'free_voucher'

@@ -33,10 +33,14 @@ import type {
   PolicyView,
   PriorityRow,
   ProgramCode,
+  Proposal,
+  ProposalKind,
   ProgramRow,
   RowIssue,
   SelfPayRow,
+  SettleExportKind,
   SettlementStatus,
+  StudentAllocRow,
   Summary,
   SupportState,
   Student,
@@ -223,6 +227,18 @@ export const api = {
     invoke<Grant[]>('grant_list', { yearId, program }),
   grantSave: (yearId: number, input: GrantInput) => invoke<number>('grant_save', { yearId, input }),
   grantDelete: (ids: number[]) => invoke<number>('grant_delete', { ids }),
+
+  // 행정자료 (Phase 4)
+  proposalKinds: () => invoke<ProposalKind[]>('proposal_kinds'),
+  proposalPreview: (workspaceId: number, kind: string) =>
+    invoke<Proposal>('proposal_preview', { workspaceId, kind }),
+  proposalExport: (workspaceId: number, kind: string) =>
+    invoke<ExportResult>('proposal_export', { workspaceId, kind }),
+  settlementStudentAllocs: (workspaceId: number, studentId: number) =>
+    invoke<StudentAllocRow[]>('settlement_student_allocs', { workspaceId, studentId }),
+  /** 최신 유효 정산일 때만 만들어진다. */
+  settlementExport: (workspaceId: number, kind: SettleExportKind) =>
+    invoke<ExportResult>('settlement_export', { workspaceId, kind }),
 
   // Excel
   excelTemplate: (kind: ImportKind) => invoke<ExportResult>('excel_template', { kind }),

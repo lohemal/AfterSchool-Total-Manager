@@ -7,6 +7,7 @@
 //!
 //! 오류가 있는 줄 때문에 정상 줄까지 버리지 않는다 (§28).
 
+pub mod admin;
 pub mod read;
 pub mod write;
 
@@ -164,7 +165,7 @@ pub fn template(kind: &str, items: &[CostItem], dir: &Path) -> AppResult<ExportR
     Ok(done(path, 0))
 }
 
-fn done(path: PathBuf, rows: usize) -> ExportResult {
+pub(crate) fn done(path: PathBuf, rows: usize) -> ExportResult {
     let name = path
         .file_name()
         .map(|n| n.to_string_lossy().to_string())

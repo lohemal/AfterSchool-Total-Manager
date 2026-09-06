@@ -8,6 +8,7 @@ pub mod department;
 pub mod eligibility;
 pub mod enrollment;
 pub mod policy;
+pub mod proposal;
 pub mod priority;
 pub mod setting;
 pub mod settle;
@@ -62,3 +63,6 @@ mod enrollment_tests;
 
 #[cfg(test)]
 mod settle_tests;
+
+#[cfg(test)]
+mod proposal_tests;

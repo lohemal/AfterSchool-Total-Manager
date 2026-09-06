@@ -1282,3 +1282,104 @@ pub fn voucher_holder_count(conn: &Connection, workspace_id: i64) -> AppResult<i
     }
     Ok(seen.len() as i64)
 }
+
+// ─────────────────────────────────────────────── 행정자료 공통 (Phase 4)
+
+/// 행정자료를 만들기 전에 **최신 유효 정산인지** 확인하고 그 id를 돌려준다.
+///
+/// 낡은 정산으로 Excel을 내보내는 것은 이 프로그램에서 가장 위험한 일이다.
+/// 잘못된 숫자가 파일이 되어 학교 밖으로 나가면 되돌릴 수 없기 때문에,
+/// 경고가 아니라 **막는다** (요구사항 §1).
+pub fn require_fresh(conn: &Connection, workspace_id: i64) -> AppResult<i64> {
+    let st = status(conn, workspace_id)?;
+    match st.state.as_str() {
+        "FRESH" => st
+            .settlement_id
+            .ok_or_else(|| AppError::not_found("정산 결과를 찾지 못했습니다.")),
+        "NONE" => Err(AppError::invalid(
+            "정산 전입니다. [정산 데이터 생성]을 먼저 실행해 주세요.",
+        )),
+        _ => Err(AppError::invalid(format!(
+            "재정산이 필요합니다. {} 지금 자료로 파일을 만들면 틀린 금액이 나갑니다.",
+            st.message
+        ))),
+    }
+}
+
+/// 학생 한 명의 정산 내역 — 부서 × 항목 × 재원 (요구사항 §3·§4의 상세 팝업).
+pub fn student_allocs(
+    conn: &Connection,
+    workspace_id: i64,
+    student_id: i64,
+) -> AppResult<Vec<crate::model::StudentAllocRow>> {
+    let Some((sid, _)) = latest_id(conn, workspace_id)? else {
+        return Ok(Vec::new());
+    };
+    let items = repo::cost_items(conn)?;
+    let name_of: HashMap<String, String> = items
+        .iter()
+        .map(|i| (i.code.clone(), i.name.clone()))
+        .collect();
+    let order: HashMap<String, usize> = items
+        .iter()
+        .enumerate()
+        .map(|(i, it)| (it.code.clone(), i))
+        .collect();
+
+    let mut st = conn.prepare(
+        "SELECT a.department_id, d.name, d.class_name, a.item_code, a.fund, a.origin,
+                SUM(a.amount)
+           FROM settlement_alloc a
+           JOIN department d ON d.id = a.department_id
+          WHERE a.settlement_id = ?1 AND a.student_id = ?2
+          GROUP BY a.department_id, a.item_code, a.fund, a.origin
+          ORDER BY d.name, d.class_name",
+    )?;
+    let mut rows = st
+        .query_map(params![sid, student_id], |r| {
+            let code: String = r.get(3)?;
+            let fund: String = r.get(4)?;
+            let origin: String = r.get(5)?;
+            Ok(crate::model::StudentAllocRow {
+                department_id: r.get(0)?,
+                dept_label: dept_label(&r.get::<_, String>(1)?, &r.get::<_, String>(2)?),
+                item_name: name_of.get(&code).cloned().unwrap_or_default(),
+                item_code: code,
+                fund_label: fund_label(&fund).to_string(),
+                fund,
+                origin_label: origin_label(&origin).to_string(),
+                origin,
+                amount: r.get(6)?,
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    drop(st);
+
+    rows.sort_by_key(|r| {
+        (
+            r.dept_label.clone(),
+            order.get(&r.item_code).copied().unwrap_or(usize::MAX),
+            r.fund.clone(),
+        )
+    });
+    Ok(rows)
+}
+
+/// 내부 코드를 사람이 읽는 말로. 화면에 `PLAIN` 같은 코드를 그대로 쓰지 않는다.
+pub fn fund_label(code: &str) -> &'static str {
+    match code {
+        "SELF_PAY" => "수익자 부담금",
+        "VOUCHER" => "이용권 지원",
+        "VOUCHER_OVER" => "이용권 초과금",
+        "FREE_VOUCHER" => "자유수강권 지원",
+        _ => "기타",
+    }
+}
+
+pub fn origin_label(code: &str) -> &'static str {
+    match code {
+        "VOUCHER_EXHAUSTED" => "이용권 소진 후 발생",
+        "FREE_EXHAUSTED" => "자유수강권 소진 후 발생",
+        _ => "일반 수익자",
+    }
+}

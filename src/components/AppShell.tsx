@@ -43,7 +43,7 @@ const NAV: { group: string | null; items: Item[] }[] = [
   },
   {
     group: '행정자료',
-    items: [{ to: '/proposal', label: '품의 양식 받기', soon: 'Phase 4' }],
+    items: [{ to: '/proposal', label: '품의 양식 받기' }],
   },
   {
     group: '시스템',

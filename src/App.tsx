@@ -14,6 +14,7 @@ import { DepartmentsPage } from '@/pages/DepartmentsPage'
 import { EligibilityPage } from '@/pages/EligibilityPage'
 import { PolicyPage } from '@/pages/PolicyPage'
 import { FreeVoucherPage, VoucherPage } from '@/pages/ProgramResultPage'
+import { ProposalPage } from '@/pages/ProposalPage'
 import { RosterPage } from '@/pages/RosterPage'
 import { SelfPayPage } from '@/pages/SelfPayPage'
 import { SettlementPage } from '@/pages/SettlementPage'
@@ -88,20 +89,7 @@ function Shell({ onYearCreated }: { onYearCreated: () => void }) {
           <Route path="voucher" element={<Guard>{<VoucherPage />}</Guard>} />
           <Route path="free-voucher" element={<Guard>{<FreeVoucherPage />}</Guard>} />
           <Route path="policy" element={<Guard>{<PolicyPage />}</Guard>} />
-          <Route
-            path="proposal"
-            element={
-              <Soon
-                title="품의 양식 받기"
-                phase="Phase 4"
-                plan={[
-                  '부서 × 재원 집계 (학생 기준이 아닙니다)',
-                  '강사료 · 수용비 · 교재비 · 재료비 · 교재재료비 통합',
-                  '열 이름표는 대상학년 설정에서 자동으로 만듭니다',
-                ]}
-              />
-            }
-          />
+          <Route path="proposal" element={<Guard>{<ProposalPage />}</Guard>} />
           <Route
             path="system"
             element={

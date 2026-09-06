@@ -518,3 +518,69 @@ pub struct GrantInput {
     pub amount: i64,
     pub reason: Option<String>,
 }
+
+// ─────────────────────────────────────────────── Phase 4 — 행정자료
+
+/// 품의 한 열. `fund`는 안정된 코드이고 `label`은 그 학년도의 표시 이름이다.
+///
+/// `3학년 지원금` 같은 문구는 여기서만 만들어진다 — DB와 정산 엔진에는 학년
+/// 개념이 들어가지 않는다 (설계안 3장).
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProposalColumn {
+    pub fund: String,
+    pub label: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProposalRow {
+    pub department_id: i64,
+    pub dept_label: String,
+    /// `columns` 차례대로의 금액
+    pub amounts: Vec<i64>,
+    pub total: i64,
+}
+
+/// 품의 집계 결과. **Excel writer는 이것을 받아 쓰기만 한다** (요구사항 §14).
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Proposal {
+    pub year_name: String,
+    pub workspace_name: String,
+    /// `강사료`, `교재·재료비` 등 사용자가 고른 품의 종류
+    pub item_label: String,
+    pub item_codes: Vec<String>,
+    pub columns: Vec<ProposalColumn>,
+    pub rows: Vec<ProposalRow>,
+    /// 마지막 전체 합계 행
+    pub total: ProposalRow,
+    /// 고른 비용항목의 정산 총액 — 교차검증에 쓴다
+    pub settlement_total: i64,
+    pub balanced: bool,
+    pub settled_at: String,
+}
+
+/// 품의로 뽑을 수 있는 종류 (요구사항 §10).
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProposalKind {
+    pub key: String,
+    pub label: String,
+    pub item_codes: Vec<String>,
+}
+
+/// 학생 한 명의 정산 내역 — 부서별 상세 팝업에 쓴다 (요구사항 §3·§4).
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StudentAllocRow {
+    pub department_id: i64,
+    pub dept_label: String,
+    pub item_code: String,
+    pub item_name: String,
+    pub fund: String,
+    pub fund_label: String,
+    pub origin: String,
+    pub origin_label: String,
+    pub amount: i64,
+}
