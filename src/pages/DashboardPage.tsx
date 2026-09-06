@@ -28,6 +28,11 @@ export function DashboardPage() {
     queryFn: () => api.departmentList(app.workspaceId!),
     enabled: app.workspaceId !== null,
   })
+  const enrollments = useQuery({
+    queryKey: ['enrollments', app.workspaceId, { status: 'ACTIVE' }],
+    queryFn: () => api.enrollmentList(app.workspaceId!, { status: 'ACTIVE' }),
+    enabled: app.workspaceId !== null,
+  })
 
   const steps: { done: boolean; label: string; to: string; hint: string }[] = [
     {
@@ -53,6 +58,12 @@ export function DashboardPage() {
       label: '부서정보와 수강료 넣기',
       to: '/departments',
       hint: '작업공간마다 따로 넣습니다',
+    },
+    {
+      done: (enrollments.data?.length ?? 0) > 0,
+      label: '수강 등록하기',
+      to: '/roster',
+      hint: 'Excel 업로드 또는 수기 추가. 부서 기준금액으로 금액이 만들어집니다',
     },
   ]
 
@@ -91,6 +102,11 @@ export function DashboardPage() {
           <div className="stat__value">{won(departments.data?.length ?? 0)}</div>
           <div className="stat__sub">{app.workspace?.name ?? '작업공간 없음'}</div>
         </div>
+        <div className="stat__item">
+          <div className="stat__label">수강중</div>
+          <div className="stat__value">{won(enrollments.data?.length ?? 0)}</div>
+          <div className="stat__sub">{app.workspace?.name ?? '작업공간 없음'}</div>
+        </div>
       </div>
 
       <Card title="준비 순서">
@@ -119,10 +135,10 @@ export function DashboardPage() {
 
       <Card title="다음 단계">
         <div className="hint" style={{ lineHeight: 1.9 }}>
-          수강 데이터 · 수강생 명단 · 학생별 금액 수정은 <b>Phase 2</b>,
           지원금 설정과 정산 엔진은 <b>Phase 3</b>, 품의자료는 <b>Phase 4</b>에서 만듭니다.
           <br />
-          지금은 기초 데이터(학생 · 지원대상자 · 부서)를 넣는 단계입니다.
+          지금은 수강 자료를 넣고 금액을 다듬는 단계입니다. 지원금 사용액과 잔액은 정산을
+          실행해야 나오므로, 그 전까지는 화면에 표시하지 않습니다.
         </div>
       </Card>
     </div>

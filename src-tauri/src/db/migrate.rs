@@ -21,11 +21,18 @@ struct Migration {
     sql: &'static str,
 }
 
-const MIGRATIONS: &[Migration] = &[Migration {
-    version: 1,
-    name: "001_init",
-    sql: include_str!("../../migrations/001_init.sql"),
-}];
+const MIGRATIONS: &[Migration] = &[
+    Migration {
+        version: 1,
+        name: "001_init",
+        sql: include_str!("../../migrations/001_init.sql"),
+    },
+    Migration {
+        version: 2,
+        name: "002_change_log_target",
+        sql: include_str!("../../migrations/002_change_log_target.sql"),
+    },
+];
 
 pub fn latest_version() -> i32 {
     MIGRATIONS.iter().map(|m| m.version).max().unwrap_or(0)

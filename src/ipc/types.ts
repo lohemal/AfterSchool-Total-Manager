@@ -185,4 +185,122 @@ export interface ExportResult {
   rows: number
 }
 
-export type ImportKind = 'students' | 'eligibility' | 'departments'
+export type ImportKind = 'students' | 'eligibility' | 'departments' | 'enrollments'
+
+// ─────────────────────────────────────────────── Phase 2 — 수강 관리
+
+export type EnrollStatus = 'ACTIVE' | 'CANCELLED'
+
+export interface Enrollment {
+  id: number
+  studentId: number
+  departmentId: number
+  grade: number
+  classNo: number
+  studentNo: number
+  name: string
+  programs: ProgramCode[]
+  deptName: string
+  deptClassName: string
+  /** 화면에 쓰는 부서 표시명 (`로봇과학A반`) */
+  deptLabel: string
+  fees: Fee[]
+  total: number
+  /** 학생별로 따로 고친 금액이 하나라도 있는가 */
+  hasOverride: boolean
+  status: EnrollStatus
+  changeReason: string
+  updatedAt: string
+}
+
+export interface EnrollmentInput {
+  studentId: number
+  departmentId: number
+  /** 비우면 부서 기준 수강료를 그대로 쓴다 */
+  fees: Fee[]
+  reason?: string
+}
+
+export interface EnrollmentFilter {
+  departmentId?: number | null
+  grade?: number | null
+  classNo?: number | null
+  program?: string | null
+  status?: EnrollStatus | null
+  query?: string | null
+}
+
+export interface FeeDiff {
+  enrollmentId: number
+  studentId: number
+  grade: number
+  classNo: number
+  studentNo: number
+  name: string
+  departmentId: number
+  deptLabel: string
+  itemCode: string
+  itemName: string
+  current: number
+  base: number
+  isOverridden: boolean
+}
+
+export interface FeeDiffView {
+  rows: FeeDiff[]
+  overridden: number
+}
+
+export interface FeePick {
+  enrollmentId: number
+  itemCode: string
+}
+
+export type ApplyMode = 'KEEP_EDITED' | 'ALL' | 'SELECTED'
+
+export interface ApplyResult {
+  changed: number
+  kept: number
+  enrollments: number
+}
+
+export interface StudentFeeEdit {
+  enrollmentId: number
+  fees: Fee[]
+}
+
+export interface ChangeLog {
+  id: number
+  at: string
+  workspaceName: string
+  kind: string
+  kindLabel: string
+  target: string
+  beforeValue: string
+  afterValue: string
+  reason: string
+}
+
+export interface SupportView {
+  program: ProgramCode
+  programLabel: string
+  /** false면 화면에 '해당없음'을 쓴다 */
+  eligible: boolean
+  periods: string[]
+  gradeMismatch: boolean
+}
+
+export interface WorkspaceEnrollments {
+  workspaceId: number
+  workspaceName: string
+  startDate: string
+  endDate: string
+  rows: Enrollment[]
+  activeTotal: number
+}
+
+export interface StudentDetail {
+  student: Student
+  supports: SupportView[]
+  workspaces: WorkspaceEnrollments[]
+}

@@ -50,15 +50,20 @@ impl From<rusqlite::Error> for AppError {
     fn from(e: rusqlite::Error) -> Self {
         // 제약조건 위반은 사용자에게 뜻이 통하는 문장으로 바꿔 준다.
         let text = e.to_string();
+        // SQLite는 위반한 **컬럼 이름**을 알려 준다
+        // (`UNIQUE constraint failed: student.year_id, student.grade, …`).
+        // 인덱스 이름이 나오는 것은 식(expression) 인덱스일 때뿐이므로 컬럼으로 가른다.
         if text.contains("UNIQUE constraint failed") {
-            let msg = if text.contains("student_key_uq") {
+            let msg = if text.contains("student.student_no") {
                 "같은 학년·반·번호의 학생이 이미 있습니다."
-            } else if text.contains("department_uq") {
+            } else if text.contains("department.class_name") {
                 "같은 부서명·반명이 이미 있습니다."
-            } else if text.contains("enrollment_active_uq") {
+            } else if text.contains("enrollment.department_id") {
                 "같은 학생이 같은 부서를 이미 수강 중입니다."
-            } else if text.contains("workspace_seq_uq") {
-                "작업공간 순서가 중복되었습니다."
+            } else if text.contains("charge.item_code") {
+                "같은 비용항목이 두 번 들어왔습니다."
+            } else if text.contains("academic_year.year") {
+                "같은 학년도가 이미 있습니다."
             } else {
                 "이미 등록된 자료입니다."
             };

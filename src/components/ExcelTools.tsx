@@ -10,7 +10,14 @@ import { open } from '@tauri-apps/plugin-dialog'
 import { useState } from 'react'
 
 import { api, errorMessage } from '@/ipc/api'
-import type { ImportKind, ImportPreview, ProgramCode, RowIssue, StudentFilter } from '@/ipc/types'
+import type {
+  EnrollmentFilter,
+  ImportKind,
+  ImportPreview,
+  ProgramCode,
+  RowIssue,
+  StudentFilter,
+} from '@/ipc/types'
 
 import { Modal } from './Modal'
 import { useToast } from './Toast'
@@ -22,6 +29,7 @@ export function ExcelTools({
   workspaceId,
   program,
   filter,
+  enrollmentFilter,
   disabled,
   onDone,
 }: {
@@ -30,6 +38,7 @@ export function ExcelTools({
   workspaceId?: number | null
   program?: ProgramCode
   filter?: StudentFilter
+  enrollmentFilter?: EnrollmentFilter
   disabled?: boolean
   onDone: () => void
 }) {
@@ -83,7 +92,7 @@ export function ExcelTools({
 
   async function download() {
     try {
-      const r = await api.excelExport({ kind, yearId, workspaceId, program, filter })
+      const r = await api.excelExport({ kind, yearId, workspaceId, program, filter, enrollmentFilter })
       toast.ok(`${r.name} (${r.rows}건) 을(를) 만들었습니다.`, {
         label: '폴더 열기',
         run: () => void api.openFolder('exports'),

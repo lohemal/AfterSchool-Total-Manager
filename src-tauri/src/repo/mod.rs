@@ -3,8 +3,10 @@
 //! 쓰기 함수는 `rusqlite::Transaction`을 `&Connection`으로 받는다
 //! (`Transaction`이 `Deref<Target = Connection>`이므로 그대로 넘길 수 있다).
 
+pub mod change_log;
 pub mod department;
 pub mod eligibility;
+pub mod enrollment;
 pub mod policy;
 pub mod setting;
 pub mod student;
@@ -52,3 +54,6 @@ pub fn required_text(label: &str, value: &str) -> AppResult<String> {
 
 #[cfg(test)]
 mod flow_tests;
+
+#[cfg(test)]
+mod enrollment_tests;

@@ -27,8 +27,9 @@ const NAV: { group: string | null; items: Item[] }[] = [
   {
     group: '수강 관리',
     items: [
-      { to: '/roster', label: '수강생 명단', soon: 'Phase 2' },
-      { to: '/student-detail', label: '학생 상세정보', soon: 'Phase 2' },
+      { to: '/roster', label: '수강생 명단' },
+      { to: '/student-detail', label: '학생 상세정보' },
+      { to: '/changes', label: '변경 이력' },
     ],
   },
   {

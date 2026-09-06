@@ -10,7 +10,7 @@ use tauri::State;
 use crate::db::Db;
 use crate::error::{AppError, AppResult};
 use crate::excel::{self, ExportResult, ImportPreview, ImportResult, RowIssue, Stage};
-use crate::model::StudentFilter;
+use crate::model::{EnrollmentFilter, StudentFilter};
 use crate::repo;
 
 /// 파일 이름에 붙일 학년도·작업공간 이름.
@@ -64,6 +64,11 @@ pub fn excel_preview(
             let items = db.read(|c| repo::cost_items(c))?;
             excel::preview_departments(&items, &file)?
         }
+        "enrollments" => {
+            let ws = workspace_id
+                .ok_or_else(|| AppError::invalid("먼저 작업공간을 선택해 주세요."))?;
+            db.read(|c| excel::preview_enrollments(c, year_id, ws, &file))?
+        }
         _ => return Err(AppError::invalid("알 수 없는 업로드 종류입니다.")),
     };
 
@@ -91,6 +96,7 @@ pub fn excel_export(
     workspace_id: Option<i64>,
     program: Option<String>,
     filter: Option<StudentFilter>,
+    enrollment_filter: Option<EnrollmentFilter>,
 ) -> AppResult<ExportResult> {
     let labels = scope_labels(&db, year_id, workspace_id)?;
     let scope: Vec<&str> = labels.iter().map(|s| s.as_str()).collect();
@@ -111,6 +117,13 @@ pub fn excel_export(
                 .ok_or_else(|| AppError::invalid("먼저 작업공간을 선택해 주세요."))?;
             let items = db.read(|c| repo::cost_items(c))?;
             db.read(|c| excel::export_departments(c, ws, &items, &scope, &dir))
+        }
+        "enrollments" => {
+            let ws = workspace_id
+                .ok_or_else(|| AppError::invalid("먼저 작업공간을 선택해 주세요."))?;
+            let items = db.read(|c| repo::cost_items(c))?;
+            let f = enrollment_filter.unwrap_or_default();
+            db.read(|c| excel::export_enrollments(c, ws, &items, &f, &scope, &dir))
         }
         _ => Err(AppError::invalid("알 수 없는 내려받기 종류입니다.")),
     }

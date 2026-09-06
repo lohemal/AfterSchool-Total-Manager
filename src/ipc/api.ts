@@ -6,13 +6,22 @@
 import { invoke } from '@tauri-apps/api/core'
 
 import type {
+  ApplyMode,
+  ApplyResult,
   Bootstrap,
+  ChangeLog,
   Department,
   DepartmentInput,
   Eligibility,
   EligibilityInput,
   EligibilityView,
+  Enrollment,
+  EnrollmentFilter,
+  EnrollmentInput,
   ExportResult,
+  Fee,
+  FeeDiffView,
+  FeePick,
   ImportKind,
   ImportPreview,
   ImportResult,
@@ -21,6 +30,8 @@ import type {
   ProgramCode,
   RowIssue,
   Student,
+  StudentDetail,
+  StudentFeeEdit,
   StudentFilter,
   StudentInput,
   Workspace,
@@ -124,6 +135,52 @@ export const api = {
       periods,
     }),
 
+  // 수강 (Phase 2)
+  enrollmentList: (workspaceId: number, filter: EnrollmentFilter) =>
+    invoke<Enrollment[]>('enrollment_list', { workspaceId, filter }),
+  enrollmentGet: (id: number) => invoke<Enrollment>('enrollment_get', { id }),
+  enrollmentByDepartment: (workspaceId: number, departmentId: number) =>
+    invoke<Enrollment[]>('enrollment_by_department', { workspaceId, departmentId }),
+  departmentBaseFees: (departmentId: number) =>
+    invoke<Fee[]>('department_base_fees', { departmentId }),
+  enrollmentCreate: (workspaceId: number, input: EnrollmentInput) =>
+    invoke<number>('enrollment_create', { workspaceId, input }),
+  enrollmentUpdateFees: (id: number, fees: Fee[], reason: string) =>
+    invoke<void>('enrollment_update_fees', { id, fees, reason }),
+  enrollmentCancel: (id: number, reason: string) =>
+    invoke<void>('enrollment_cancel', { id, reason }),
+  enrollmentRestore: (id: number, reason: string) =>
+    invoke<void>('enrollment_restore', { id, reason }),
+  enrollmentSaveStudentFees: (edits: StudentFeeEdit[], reason: string) =>
+    invoke<number>('enrollment_save_student_fees', { edits, reason }),
+  enrollmentFeeDiff: (workspaceId: number, departmentId: number | null) =>
+    invoke<FeeDiffView>('enrollment_fee_diff', { workspaceId, departmentId }),
+  enrollmentApplyFees: (args: {
+    workspaceId: number
+    departmentId: number | null
+    mode: ApplyMode
+    picks: FeePick[]
+    reason: string
+  }) => invoke<ApplyResult>('enrollment_apply_fees', args),
+
+  // 변경이력 · 학생 상세정보
+  changeLogList: (args: {
+    yearId: number
+    workspaceId?: number | null
+    studentId?: number | null
+    kind?: string | null
+    limit?: number
+  }) =>
+    invoke<ChangeLog[]>('change_log_list', {
+      yearId: args.yearId,
+      workspaceId: args.workspaceId ?? null,
+      studentId: args.studentId ?? null,
+      kind: args.kind ?? null,
+      limit: args.limit ?? 500,
+    }),
+  studentDetail: (yearId: number, studentId: number) =>
+    invoke<StudentDetail>('student_detail', { yearId, studentId }),
+
   // Excel
   excelTemplate: (kind: ImportKind) => invoke<ExportResult>('excel_template', { kind }),
   excelPreview: (args: {
@@ -148,6 +205,7 @@ export const api = {
     workspaceId?: number | null
     program?: ProgramCode | null
     filter?: StudentFilter | null
+    enrollmentFilter?: EnrollmentFilter | null
   }) =>
     invoke<ExportResult>('excel_export', {
       kind: args.kind,
@@ -155,6 +213,7 @@ export const api = {
       workspaceId: args.workspaceId ?? null,
       program: args.program ?? null,
       filter: args.filter ?? null,
+      enrollmentFilter: args.enrollmentFilter ?? null,
     }),
   excelExportIssues: (issues: RowIssue[], headers: string[]) =>
     invoke<ExportResult>('excel_export_issues', { issues, headers }),

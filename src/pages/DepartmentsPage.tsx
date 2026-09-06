@@ -8,9 +8,11 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 
+import { ApplyFeesModal } from '@/components/ApplyFeesModal'
 import { cmp, DataTable, type Column } from '@/components/DataTable'
 import { ExcelTools } from '@/components/ExcelTools'
 import { Confirm, Modal } from '@/components/Modal'
+import { StudentFeesModal } from '@/components/StudentFeesModal'
 import { useToast } from '@/components/Toast'
 import { Button, Card, Empty, Field, Input, MoneyInput, Notice, Search } from '@/components/ui'
 import { api, errorMessage } from '@/ipc/api'
@@ -28,6 +30,10 @@ export function DepartmentsPage() {
   const [selected, setSelected] = useState<number[]>([])
   const [editing, setEditing] = useState<Department | 'new' | null>(null)
   const [confirm, setConfirm] = useState<'some' | 'all' | null>(null)
+  /** 학생별 금액 수정 팝업을 띄울 부서 */
+  const [feesFor, setFeesFor] = useState<Department | null>(null)
+  /** 부서금액 반영 팝업 — 부서 하나 또는 전체 */
+  const [applyFor, setApplyFor] = useState<Department | 'all' | null>(null)
 
   const wsId = app.workspaceId
 
@@ -136,7 +142,8 @@ export function DepartmentsPage() {
 
       <Notice tone="info">
         여기 금액은 <b>기준</b> 수강료입니다. 이미 등록된 수강생의 금액은 자동으로 바뀌지
-        않습니다 — 반영이 필요하면 수강생 명단의 [부서정보 반영]을 씁니다. (Phase 2)
+        않습니다 — 부서를 고른 뒤 <b>[학생별 수정]</b>으로 한 명씩 고치거나,{' '}
+        <b>[부서금액 반영]</b>으로 무엇이 바뀌는지 확인한 뒤 반영합니다.
       </Notice>
 
       <Card
@@ -150,8 +157,20 @@ export function DepartmentsPage() {
             <Button small disabled={!one} onClick={() => one && setEditing(one)}>
               수정
             </Button>
-            <Button small disabled title="Phase 2에서 만듭니다">
+            <Button
+              small
+              disabled={!one}
+              title={one ? `${one.name} 수강생의 금액을 학생별로 고칩니다` : '부서를 먼저 고르세요'}
+              onClick={() => one && setFeesFor(one)}
+            >
               학생별 수정
+            </Button>
+            <Button
+              small
+              onClick={() => setApplyFor(one ?? 'all')}
+              title={one ? `${one.name}의 기준금액을 수강생에게 반영합니다` : '모든 부서의 기준금액을 반영합니다'}
+            >
+              {one ? '이 부서 금액 반영' : '부서금액 반영'}
             </Button>
             <Button small variant="danger" disabled={selected.length === 0} onClick={() => setConfirm('some')}>
               선택 삭제
@@ -204,6 +223,28 @@ export function DepartmentsPage() {
           onClose={() => setEditing(null)}
           onSaved={() => {
             setEditing(null)
+            void qc.invalidateQueries()
+          }}
+        />
+      )}
+
+      {feesFor && (
+        <StudentFeesModal
+          department={feesFor}
+          onClose={() => setFeesFor(null)}
+          onSaved={() => {
+            setFeesFor(null)
+            void qc.invalidateQueries()
+          }}
+        />
+      )}
+
+      {applyFor && (
+        <ApplyFeesModal
+          department={applyFor === 'all' ? null : applyFor}
+          onClose={() => setApplyFor(null)}
+          onApplied={() => {
+            setApplyFor(null)
             void qc.invalidateQueries()
           }}
         />

@@ -8,10 +8,13 @@ import { ToastProvider } from '@/components/Toast'
 import { Button } from '@/components/ui'
 import { errorMessage } from '@/ipc/api'
 import { AppProvider, useApp } from '@/lib/useApp'
+import { ChangeLogPage } from '@/pages/ChangeLogPage'
 import { DashboardPage } from '@/pages/DashboardPage'
 import { DepartmentsPage } from '@/pages/DepartmentsPage'
 import { EligibilityPage } from '@/pages/EligibilityPage'
+import { RosterPage } from '@/pages/RosterPage'
 import { Soon } from '@/pages/Soon'
+import { StudentDetailPage } from '@/pages/StudentDetailPage'
 import { StudentsPage } from '@/pages/StudentsPage'
 import { WelcomePage } from '@/pages/WelcomePage'
 import { WorkspacesPage } from '@/pages/WorkspacesPage'
@@ -73,37 +76,9 @@ function Shell({ onYearCreated }: { onYearCreated: () => void }) {
           <Route path="eligibility" element={<Guard>{<EligibilityPage />}</Guard>} />
           <Route path="departments" element={<Guard>{<DepartmentsPage />}</Guard>} />
 
-          <Route
-            path="roster"
-            element={
-              <Soon
-                title="수강생 명단"
-                phase="Phase 2"
-                plan={[
-                  '수강 데이터 Excel 업로드와 수기 추가',
-                  '행 선택 → 수정 팝업 (실제 적용 금액 하나만 보여 줍니다)',
-                  '수강 취소 — 자료를 지우지 않고 취소 상태로 바꾸고 사유를 받습니다',
-                  '부서정보 반영 — 손으로 고친 금액은 덮지 않습니다',
-                  '변경 이력 기록',
-                ]}
-              />
-            }
-          />
-          <Route
-            path="student-detail"
-            element={
-              <Soon
-                title="학생 상세정보"
-                phase="Phase 2"
-                plan={[
-                  '학년·반·번호·이름 중 하나만 넣어도 조회',
-                  '작업공간별 수강·금액 내역',
-                  '지원금 사용내역 · 누적 · 잔액',
-                  '자격이 없는 제도는 해당없음으로 분명히 표시',
-                ]}
-              />
-            }
-          />
+          <Route path="roster" element={<Guard>{<RosterPage />}</Guard>} />
+          <Route path="student-detail" element={<Guard>{<StudentDetailPage />}</Guard>} />
+          <Route path="changes" element={<Guard>{<ChangeLogPage />}</Guard>} />
           <Route
             path="settlement"
             element={
