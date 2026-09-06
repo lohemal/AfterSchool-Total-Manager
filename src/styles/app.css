@@ -298,6 +298,13 @@
   pointer-events: none;
 }
 
+/*
+ * 도구줄. 아래쪽 정렬이라 입력칸과 버튼의 밑선이 맞는다.
+ *
+ * 그래서 도구줄 안의 Field에는 `hint`를 주지 않는다 — 안내문이 붙은 칸만
+ * 높아져서 그 칸의 라벨이 위로 밀려 올라가기 때문이다.
+ * 안내문은 도구줄 밖에 `.toolbar__note`로 붙인다.
+ */
 .toolbar {
   display: flex;
   align-items: flex-end;
@@ -307,6 +314,14 @@
 
 .toolbar__spacer {
   flex: 1;
+}
+
+/* 도구줄 아래 한 줄 안내문 */
+.toolbar__note {
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--gray-500);
+  line-height: 1.6;
 }
 
 /* ─────────────────────────────────────────── 버튼 */

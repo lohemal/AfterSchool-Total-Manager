@@ -86,7 +86,7 @@ export function ProposalPage() {
         </div>
       </div>
 
-      <Card title="무엇을 뽑을지">
+      <Card title="출력할 수강료 항목 선택">
         <div className="toolbar">
           <Field label="작업공간">
             <Select
@@ -101,7 +101,7 @@ export function ProposalPage() {
               ))}
             </Select>
           </Field>
-          <Field label="비용항목" hint="교재·재료비를 합쳐 처리하는 학교는 통합을 고릅니다.">
+          <Field label="비용항목">
             <Select value={kind} onChange={(e) => setKind(e.target.value)} style={{ width: 170 }}>
               {(kinds.data ?? []).map((k) => (
                 <option key={k.key} value={k.key}>
@@ -122,6 +122,9 @@ export function ProposalPage() {
               )}
             </div>
           </Field>
+        </div>
+        <div className="toolbar__note">
+          교재·재료비를 합쳐 처리하는 학교는 <b>교재비·재료비</b> 통합을 고릅니다.
         </div>
       </Card>
 
