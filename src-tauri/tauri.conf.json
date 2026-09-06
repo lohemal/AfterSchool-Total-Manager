@@ -47,7 +47,7 @@
     },
     "createUpdaterArtifacts": true,
     "publisher": "lohemal",
-    "homepage": "https://github.com/lohemal/afterschool-manager",
+    "homepage": "https://github.com/lohemal/AfterSchool-Total-Manager",
     "copyright": "Copyright © 2026 lohemal",
     "shortDescription": "방과후학교 수강·정산·품의 통합 관리",
     "longDescription": "전교생 학생정보를 바탕으로 방과후 수강생과 수강료를 관리하고, 방과후 이용권·자유수강권 지원금을 차감해 수익자 부담금과 부서별 품의자료를 만듭니다. 모든 자료는 이 컴퓨터에만 저장됩니다.",
@@ -56,7 +56,7 @@
   "plugins": {
     "updater": {
       "endpoints": [
-        "https://github.com/lohemal/afterschool-manager/releases/latest/download/latest.json"
+        "https://github.com/lohemal/AfterSchool-Total-Manager/releases/latest/download/latest.json"
       ],
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEJBQ0I4MjE2MDkwNTc5MDkKUldRSmVRVUpGb0xMdXVNbWpsY25TdzF4c0E0aHNSQU5QNE5JbTZXclg4YzlpaDVwU3ZXOVV3NmkK",
       "windows": {

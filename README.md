@@ -91,9 +91,20 @@ src-tauri/
 ## 남은 일
 
 - [ ] 앱 아이콘 교체 — `src-tauri/icons/README.md` 참고 (1024×1024 PNG 하나 준비)
-- [ ] **GitHub 저장소 이름 확인** — 지금 `tauri.conf.json`과 문서에 적힌
-      `lohemal/afterschool-manager`는 임시로 정한 값입니다. 실제 저장소 이름이
-      다르면 `plugins.updater.endpoints`와 `bundle.homepage`를 먼저 고쳐야
-      업데이트 확인이 됩니다.
-- [ ] 저장소 만들고 서명 키를 Secrets에 넣은 뒤 첫 Release 발행 — `docs/02-배포.md` 5·7장
-- [ ] 실제 구버전 → 신버전 업데이트 시험 (Release가 두 개 있어야 할 수 있습니다)
+- [ ] GitHub 저장소 `lohemal/AfterSchool-Total-Manager` 만들기
+- [ ] 서명 키를 저장소 Secrets에 넣기 — `docs/02-배포.md` 5장
+- [ ] 첫 Release 발행 (`git tag v0.1.0` 푸시) — `docs/02-배포.md` 7장
+- [ ] 실제 구버전 → 신버전 업데이트 시험 (Release가 두 개 있어야 합니다) —
+      `docs/02-배포.md` 11장 ③
+
+## 배포
+
+| 항목 | 값 |
+|---|---|
+| 저장소 | `lohemal/AfterSchool-Total-Manager` |
+| 태그 | `v0.1.0`, `v0.1.1`, … (`v` + 앱 버전) |
+| 첨부 파일 | `afterschool_<버전>_x64-setup.exe` · `.exe.sig` · `latest.json` · `SHA256SUMS.txt` |
+| 앱 표시명 | 방과후 통합 매니저 (한글 그대로) |
+
+설치파일 이름만 영문입니다 — GitHub Release가 첨부 파일 이름에서 한글을 떼어 내
+`latest.json`의 주소와 어긋나기 때문입니다. 자세한 내용은 `docs/02-배포.md` 6장.

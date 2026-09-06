@@ -140,6 +140,72 @@ fn 한글_이름_설치파일을_영문으로_바꿔_올린다() {
     );
 }
 
+/// 확정된 Release 저장소. 여기가 어긋나면 업데이트 확인이 실패한다.
+const REPO: &str = "lohemal/AfterSchool-Total-Manager";
+
+#[test]
+fn 저장소_주소가_세_곳에서_같다() {
+    // 저장소 주소는 세 곳에 나온다. 하나만 고치고 지나가면 업데이트 확인이
+    // 조용히 실패하거나 [Release 페이지 열기]가 없는 곳으로 간다.
+    let conf = tauri_conf();
+    let expect_base = format!("https://github.com/{REPO}");
+
+    let endpoint = conf["plugins"]["updater"]["endpoints"][0]
+        .as_str()
+        .expect("updater.endpoints[0]");
+    assert_eq!(
+        endpoint,
+        format!("{expect_base}/releases/latest/download/latest.json"),
+        "updater 확인 주소가 확정 저장소({REPO})와 다릅니다."
+    );
+
+    assert_eq!(
+        conf["bundle"]["homepage"].as_str(),
+        Some(expect_base.as_str()),
+        "bundle.homepage가 확정 저장소({REPO})와 다릅니다."
+    );
+
+    assert_eq!(
+        crate::commands::system::RELEASE_URL,
+        format!("{expect_base}/releases"),
+        "system.rs의 RELEASE_URL이 확정 저장소({REPO})와 다릅니다."
+    );
+}
+
+#[test]
+fn 옛_저장소_이름이_남아_있지_않다() {
+    // 임시로 쓰던 이름. 어딘가에 남아 있으면 업데이트가 없는 곳을 본다.
+    for (곳, 내용) in [
+        ("tauri.conf.json", include_str!("../tauri.conf.json")),
+        (
+            "commands/system.rs",
+            include_str!("commands/system.rs"),
+        ),
+        (
+            "release.yml",
+            include_str!("../../.github/workflows/release.yml"),
+        ),
+    ] {
+        assert!(
+            !내용.contains("afterschool-manager"),
+            "{곳}에 옛 저장소 이름(afterschool-manager)이 남아 있습니다."
+        );
+    }
+}
+
+#[test]
+fn 릴리스_첨부_파일_이름이_약속과_같다() {
+    // 사용자와 약속한 이름이다. 바뀌면 latest.json의 주소도 함께 어긋난다.
+    let wf = include_str!("../../.github/workflows/release.yml");
+    assert!(
+        wf.contains(r#"$name = "afterschool_${ver}_x64-setup.exe""#),
+        "설치파일 이름 규칙(afterschool_<버전>_x64-setup.exe)이 바뀌었습니다."
+    );
+    for 파일 in ["latest.json", "SHA256SUMS.txt"] {
+        assert!(wf.contains(파일), "{파일}을 만들지 않습니다.");
+    }
+}
+
 #[test]
 fn 자료_폴더_식별자가_바뀌지_않았다() {
     // 이 값이 바뀌면 %APPDATA% 아래 폴더가 달라져 기존 자료를 못 찾는다

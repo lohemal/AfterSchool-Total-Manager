@@ -4,10 +4,15 @@
 #   git commit -am "v0.1.1"
 #   git tag v0.1.1 && git push origin main --tags
 #
+# 저장소: lohemal/AfterSchool-Total-Manager
+# 아래 latest.json 의 주소는 ${{ github.repository }} 로 받으므로, 저장소 이름이
+# 바뀌어도 이 파일은 고칠 것이 없다.
+#
 # Release에 반드시 올라가야 하는 것 (하나라도 빠지면 업데이트가 안 된다)
 #   · afterschool_<버전>_x64-setup.exe        설치파일
 #   · afterschool_<버전>_x64-setup.exe.sig    서명
 #   · latest.json                             업데이터가 읽는 목록
+#   · SHA256SUMS.txt                          직접 받은 파일 검증용
 #
 # ## 왜 tauri-action의 includeUpdaterJson을 쓰지 않는가
 #

@@ -31,7 +31,7 @@ pub struct AppInfo {
 }
 
 /// Release 저장소. 화면에 URL 자체를 노출하지 않고 [Release 페이지 열기]로만 쓴다.
-pub const RELEASE_URL: &str = "https://github.com/lohemal/afterschool-manager/releases";
+pub const RELEASE_URL: &str = "https://github.com/lohemal/AfterSchool-Total-Manager/releases";
 
 #[tauri::command]
 pub fn app_info(db: State<'_, Db>) -> AppResult<AppInfo> {
