@@ -62,7 +62,17 @@ pub fn eligibility_delete(db: State<'_, Db>, ids: Vec<i64>) -> AppResult<usize> 
     db.write(|c| eligibility::delete_many(c, &ids))
 }
 
+/// 그 제도의 대상자 명단을 모두 지운다. **삭제 직전에 자동백업을 남긴다.**
 #[tauri::command]
-pub fn eligibility_delete_all(db: State<'_, Db>, year_id: i64, program: String) -> AppResult<usize> {
-    db.write(|c| eligibility::delete_all(c, year_id, &program))
+pub fn eligibility_delete_all(
+    db: State<'_, Db>,
+    year_id: i64,
+    program: String,
+) -> AppResult<crate::commands::system::BulkDeleteResult> {
+    let backup = crate::commands::system::guard_bulk_delete(&db, "지원대상자 명단 전체")?;
+    let deleted = db.write(|c| eligibility::delete_all(c, year_id, &program))?;
+    Ok(crate::commands::system::BulkDeleteResult {
+        deleted: deleted as i64,
+        backup,
+    })
 }

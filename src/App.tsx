@@ -18,9 +18,9 @@ import { ProposalPage } from '@/pages/ProposalPage'
 import { RosterPage } from '@/pages/RosterPage'
 import { SelfPayPage } from '@/pages/SelfPayPage'
 import { SettlementPage } from '@/pages/SettlementPage'
-import { Soon } from '@/pages/Soon'
 import { StudentDetailPage } from '@/pages/StudentDetailPage'
 import { StudentsPage } from '@/pages/StudentsPage'
+import { SystemPage } from '@/pages/SystemPage'
 import { WelcomePage } from '@/pages/WelcomePage'
 import { WorkspacesPage } from '@/pages/WorkspacesPage'
 
@@ -90,16 +90,7 @@ function Shell({ onYearCreated }: { onYearCreated: () => void }) {
           <Route path="free-voucher" element={<Guard>{<FreeVoucherPage />}</Guard>} />
           <Route path="policy" element={<Guard>{<PolicyPage />}</Guard>} />
           <Route path="proposal" element={<Guard>{<ProposalPage />}</Guard>} />
-          <Route
-            path="system"
-            element={
-              <Soon
-                title="백업 · 복원 · 업데이트"
-                phase="Phase 5"
-                plan={['전체 백업과 복원', '업데이트 확인', '오류 로그']}
-              />
-            }
-          />
+          <Route path="system" element={<Guard>{<SystemPage />}</Guard>} />
         </Route>
       </Routes>
       <YearGate onCreated={onYearCreated} />

@@ -6,8 +6,12 @@
 import { invoke } from '@tauri-apps/api/core'
 
 import type {
+  AppInfo,
   ApplyMode,
   ApplyResult,
+  BackupFile,
+  BackupInfo,
+  BulkDeleteResult,
   Bootstrap,
   ChangeLog,
   Department,
@@ -36,6 +40,7 @@ import type {
   Proposal,
   ProposalKind,
   ProgramRow,
+  RestoreReport,
   RowIssue,
   SelfPayRow,
   SettleExportKind,
@@ -70,7 +75,7 @@ export function errorMessage(e: unknown): string {
 
 export const api = {
   bootstrap: () => invoke<Bootstrap>('bootstrap'),
-  openFolder: (which: 'data' | 'exports' | 'backups') =>
+  openFolder: (which: 'data' | 'exports' | 'backups' | 'logs') =>
     invoke<void>('open_folder', { which }),
   getSetting: (key: string) => invoke<string | null>('get_setting', { key }),
   setSetting: (key: string, value: string) => invoke<void>('set_setting', { key, value }),
@@ -106,7 +111,8 @@ export const api = {
     invoke<number>('student_create', { yearId, input }),
   studentUpdate: (id: number, input: StudentInput) => invoke<void>('student_update', { id, input }),
   studentDelete: (ids: number[]) => invoke<number>('student_delete', { ids }),
-  studentDeleteAll: (yearId: number) => invoke<number>('student_delete_all', { yearId }),
+  studentDeleteAll: (yearId: number) =>
+    invoke<BulkDeleteResult>('student_delete_all', { yearId }),
 
   // 지원대상자
   eligibilityList: (yearId: number, program: ProgramCode, query?: string) =>
@@ -117,7 +123,7 @@ export const api = {
     invoke<void>('eligibility_update', { id, input }),
   eligibilityDelete: (ids: number[]) => invoke<number>('eligibility_delete', { ids }),
   eligibilityDeleteAll: (yearId: number, program: ProgramCode) =>
-    invoke<number>('eligibility_delete_all', { yearId, program }),
+    invoke<BulkDeleteResult>('eligibility_delete_all', { yearId, program }),
 
   // 부서정보
   departmentList: (workspaceId: number, query?: string) =>
@@ -128,7 +134,7 @@ export const api = {
     invoke<void>('department_update', { id, input }),
   departmentDelete: (ids: number[]) => invoke<number>('department_delete', { ids }),
   departmentDeleteAll: (workspaceId: number) =>
-    invoke<number>('department_delete_all', { workspaceId }),
+    invoke<BulkDeleteResult>('department_delete_all', { workspaceId }),
 
   // 지원금 정책 (설정 화면은 Phase 3)
   policyList: (yearId: number) => invoke<PolicyView[]>('policy_list', { yearId }),
@@ -227,6 +233,18 @@ export const api = {
     invoke<Grant[]>('grant_list', { yearId, program }),
   grantSave: (yearId: number, input: GrantInput) => invoke<number>('grant_save', { yearId, input }),
   grantDelete: (ids: number[]) => invoke<number>('grant_delete', { ids }),
+
+  // 앱 정보 · 백업 · 복원 (Phase 5)
+  appInfo: () => invoke<AppInfo>('app_info'),
+  backupCreate: () => invoke<BackupFile>('backup_create'),
+  backupList: () => invoke<BackupFile[]>('backup_list'),
+  backupDelete: (name: string) => invoke<void>('backup_delete', { name }),
+  /** 복원하지 않고 파일만 살펴본다. */
+  backupInspect: (path: string) => invoke<BackupInfo>('backup_inspect', { path }),
+  backupRestore: (name: string) => invoke<RestoreReport>('backup_restore', { name }),
+  backupRestoreFile: (path: string) => invoke<RestoreReport>('backup_restore_file', { path }),
+  enrollmentDeleteAll: (workspaceId: number) =>
+    invoke<BulkDeleteResult>('enrollment_delete_all', { workspaceId }),
 
   // 행정자료 (Phase 4)
   proposalKinds: () => invoke<ProposalKind[]>('proposal_kinds'),

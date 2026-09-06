@@ -31,7 +31,16 @@ pub fn student_delete(db: State<'_, Db>, ids: Vec<i64>) -> AppResult<usize> {
     db.write(|c| student::delete_many(c, &ids))
 }
 
+/// 전교생을 모두 지운다. **삭제 직전에 자동백업을 남긴다** (요구사항 §7).
 #[tauri::command]
-pub fn student_delete_all(db: State<'_, Db>, year_id: i64) -> AppResult<usize> {
-    db.write(|c| student::delete_all(c, year_id))
+pub fn student_delete_all(
+    db: State<'_, Db>,
+    year_id: i64,
+) -> AppResult<crate::commands::system::BulkDeleteResult> {
+    let backup = crate::commands::system::guard_bulk_delete(&db, "학생정보 전체")?;
+    let deleted = db.write(|c| student::delete_all(c, year_id))?;
+    Ok(crate::commands::system::BulkDeleteResult {
+        deleted: deleted as i64,
+        backup,
+    })
 }

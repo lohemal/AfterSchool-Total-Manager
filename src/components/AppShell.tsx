@@ -49,7 +49,7 @@ const NAV: { group: string | null; items: Item[] }[] = [
     group: '시스템',
     items: [
       { to: '/policy', label: '학년도 지원금 설정' },
-      { to: '/system', label: '백업·복원·업데이트', soon: 'Phase 5' },
+      { to: '/system', label: '백업·복원·업데이트' },
     ],
   },
 ]

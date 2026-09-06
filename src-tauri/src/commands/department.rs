@@ -35,7 +35,17 @@ pub fn department_delete(db: State<'_, Db>, ids: Vec<i64>) -> AppResult<usize> {
     db.write(|c| department::delete_many(c, &ids))
 }
 
+/// 이 작업공간의 부서를 모두 지운다. 수강 자료도 함께 사라지므로
+/// **삭제 직전에 자동백업을 남긴다.**
 #[tauri::command]
-pub fn department_delete_all(db: State<'_, Db>, workspace_id: i64) -> AppResult<usize> {
-    db.write(|c| department::delete_all(c, workspace_id))
+pub fn department_delete_all(
+    db: State<'_, Db>,
+    workspace_id: i64,
+) -> AppResult<crate::commands::system::BulkDeleteResult> {
+    let backup = crate::commands::system::guard_bulk_delete(&db, "부서정보 전체")?;
+    let deleted = db.write(|c| department::delete_all(c, workspace_id))?;
+    Ok(crate::commands::system::BulkDeleteResult {
+        deleted: deleted as i64,
+        backup,
+    })
 }

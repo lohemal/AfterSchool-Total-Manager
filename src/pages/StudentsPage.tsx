@@ -76,8 +76,9 @@ export function StudentsPage() {
 
   const removeAll = useMutation({
     mutationFn: () => api.studentDeleteAll(app.yearId),
-    onSuccess: (n) => {
-      toast.ok(`학생정보 ${n}건을 모두 지웠습니다.`)
+    onSuccess: (r) => {
+      // 삭제 직전 자동백업 이름을 함께 알려 준다 — 실수해도 되돌릴 수 있다
+      toast.ok(`학생정보 ${r.deleted}건을 지웠습니다. 삭제 전 자료는 ${r.backup} 에 있습니다.`)
       setSelected([])
       setConfirm(null)
       void qc.invalidateQueries()
@@ -261,9 +262,17 @@ export function StudentsPage() {
           confirmText="모두 삭제"
           message={
             <>
-              정말 <b>모든</b> 학생정보를 삭제하시겠습니까?
-              <br />
-              수강 자료와 지원자격도 함께 사라지며 되돌릴 수 없습니다.
+              이 작업은 <b>{app.year?.name}</b>의 학생정보 <b>{(all.data ?? []).length}명</b>을
+              모두 삭제합니다.
+              <div style={{ marginTop: 8, lineHeight: 1.9 }}>
+                함께 사라지는 것:
+                <br />· 그 학생들의 지원자격(이용권·자유수강권) 명단
+                <br />· 모든 작업공간의 수강 자료와 금액
+              </div>
+              <div style={{ marginTop: 10 }}>
+                삭제 직전에 <b>자동으로 백업</b>됩니다. 실수했더라도 [백업·복원·업데이트]에서
+                되돌릴 수 있습니다.
+              </div>
             </>
           }
           busy={removeAll.isPending}

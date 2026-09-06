@@ -36,6 +36,7 @@ pub fn bootstrap(db: State<'_, Db>) -> AppResult<Bootstrap> {
 pub fn open_folder(db: State<'_, Db>, which: String) -> AppResult<()> {
     let dir = match which.as_str() {
         "exports" => db.export_dir(),
+        "logs" => db.log_dir(),
         "backups" => db.backup_dir(),
         _ => db.data_dir(),
     };

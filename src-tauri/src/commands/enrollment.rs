@@ -183,3 +183,17 @@ pub fn student_detail(db: State<'_, Db>, year_id: i64, student_id: i64) -> AppRe
         repo::enrollment::student_detail(c, year_id, student_id, &items)
     })
 }
+
+/// 이 작업공간의 수강 자료를 모두 지운다. **삭제 직전에 자동백업을 남긴다.**
+#[tauri::command]
+pub fn enrollment_delete_all(
+    db: State<'_, Db>,
+    workspace_id: i64,
+) -> AppResult<crate::commands::system::BulkDeleteResult> {
+    let backup = crate::commands::system::guard_bulk_delete(&db, "수강 자료 전체")?;
+    let deleted = db.write(|c| repo::enrollment::delete_all(c, workspace_id))?;
+    Ok(crate::commands::system::BulkDeleteResult {
+        deleted: deleted as i64,
+        backup,
+    })
+}

@@ -9,4 +9,5 @@ pub mod excel;
 pub mod policy;
 pub mod settle;
 pub mod student;
+pub mod system;
 pub mod year;

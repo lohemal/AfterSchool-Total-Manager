@@ -59,8 +59,8 @@ export function EligibilityPage() {
 
   const removeAll = useMutation({
     mutationFn: () => api.eligibilityDeleteAll(app.yearId, program),
-    onSuccess: (n) => {
-      toast.ok(`${n}건을 모두 지웠습니다.`)
+    onSuccess: (r) => {
+      toast.ok(`${r.deleted}건을 지웠습니다. 삭제 전 자료는 ${r.backup} 에 있습니다.`)
       setSelected([])
       setConfirm(null)
       void qc.invalidateQueries()
@@ -243,8 +243,16 @@ export function EligibilityPage() {
           confirmText="모두 삭제"
           message={
             <>
-              정말 <b>{TABS.find((t) => t.code === program)?.label}</b> 대상자를 모두
-              삭제하시겠습니까? 되돌릴 수 없습니다.
+              이 작업은 <b>{app.year?.name}</b>의{' '}
+              <b>{TABS.find((t) => t.code === program)?.label}</b> 대상자{' '}
+              <b>{(view.data?.rows ?? []).length}명</b>을 명단에서 모두 삭제합니다.
+              <div style={{ marginTop: 8, lineHeight: 1.9 }}>
+                학생정보 자체는 지워지지 않습니다. 다만 이 명단이 비면 그 학생들은 정산에서
+                지원 대상이 아니게 됩니다.
+              </div>
+              <div style={{ marginTop: 10 }}>
+                삭제 직전에 <b>자동으로 백업</b>됩니다.
+              </div>
             </>
           }
           busy={removeAll.isPending}

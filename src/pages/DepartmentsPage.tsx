@@ -56,8 +56,8 @@ export function DepartmentsPage() {
 
   const removeAll = useMutation({
     mutationFn: () => api.departmentDeleteAll(wsId!),
-    onSuccess: (n) => {
-      toast.ok(`부서 ${n}개를 모두 지웠습니다.`)
+    onSuccess: (r) => {
+      toast.ok(`부서 ${r.deleted}개를 지웠습니다. 삭제 전 자료는 ${r.backup} 에 있습니다.`)
       setSelected([])
       setConfirm(null)
       void qc.invalidateQueries()
@@ -273,9 +273,17 @@ export function DepartmentsPage() {
           confirmText="모두 삭제"
           message={
             <>
-              정말 이 작업공간의 <b>모든</b> 부서를 삭제하시겠습니까?
-              <br />
-              수강 자료도 함께 사라지며 되돌릴 수 없습니다.
+              이 작업은 <b>{app.workspace?.name}</b> 작업공간의 부서{' '}
+              <b>{(list.data ?? []).length}개</b>를 모두 삭제합니다.
+              <div style={{ marginTop: 8, lineHeight: 1.9 }}>
+                함께 사라지는 것:
+                <br />· 이 부서들의 수강 자료{' '}
+                <b>{(list.data ?? []).reduce((s, d) => s + d.enrollmentCount, 0)}건</b>과 금액
+                <br />· 이 작업공간의 부서 차감 우선순위
+              </div>
+              <div style={{ marginTop: 10 }}>
+                삭제 직전에 <b>자동으로 백업</b>됩니다. 다른 작업공간의 자료는 그대로입니다.
+              </div>
             </>
           }
           busy={removeAll.isPending}

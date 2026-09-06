@@ -16,12 +16,14 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
+tauri-plugin-updater = "2"
+tauri-plugin-opener = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 rusqlite = { version = "0.32", features = ["bundled", "backup"] }
 chrono = "0.4"
 thiserror = "2"
-log = "0.4"
+log = { version = "0.4", features = ["std"] }
 calamine = "0.26"
 rust_xlsxwriter = "0.79"
 uuid = { version = "1", features = ["v4"] }

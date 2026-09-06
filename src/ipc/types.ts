@@ -491,3 +491,55 @@ export interface StudentAllocRow {
 
 /** 정산 결과 Excel 종류 */
 export type SettleExportKind = 'self_pay' | 'voucher' | 'free_voucher'
+
+// ─────────────────────────────────────────────── Phase 5 — 배포 · 백업
+
+export interface AppInfo {
+  version: string
+  /** 자료구조 버전 — 백업 호환 판단에 쓴다 */
+  schemaVersion: number
+  dbPath: string
+  dataDir: string
+  backupDir: string
+  exportDir: string
+  logDir: string
+  releaseUrl: string
+  dbSize: number
+}
+
+export interface BackupFile {
+  name: string
+  path: string
+  kind: string
+  /** `수동 백업` 등 사람이 읽는 종류 */
+  kindLabel: string
+  createdAt: string
+  size: number
+  /** 자동 정리 대상인가 */
+  prunable: boolean
+}
+
+export interface BackupInfo {
+  userVersion: number
+  appVersion: number
+  tables: number
+  tooNew: boolean
+  yearCount: number
+  studentCount: number
+  enrollmentCount: number
+  settlementCount: number
+}
+
+export interface RestoreReport {
+  fromVersion: number
+  toVersion: number
+  /** 구버전 백업이라 자료구조를 올렸는가 */
+  migrated: boolean
+  safetyBackup: string
+}
+
+/** 대량 삭제 결과 — 되돌릴 수 있는 백업 이름을 함께 준다 */
+export interface BulkDeleteResult {
+  deleted: number
+  backup: string
+}

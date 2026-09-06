@@ -14,11 +14,13 @@ pub mod db;
 pub mod domain;
 pub mod error;
 pub mod excel;
+pub mod logging;
 pub mod model;
 pub mod repo;
 
 use tauri::Manager;
 
+use crate::db::backup::BackupKind;
 use crate::db::Db;
 use crate::excel::Stage;
 
@@ -26,16 +28,36 @@ use crate::excel::Stage;
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             let dir = app.path().app_data_dir()?;
             std::fs::create_dir_all(&dir)?;
+
+            // 로그를 먼저 붙인다 — 자료 파일을 여는 과정도 기록에 남아야 한다.
+            logging::init(&dir.join("logs"));
+            log::info!(
+                "방과후 통합 매니저 {} 시작 · 자료 폴더 {}",
+                env!("CARGO_PKG_VERSION"),
+                dir.display()
+            );
+
             let db = Db::open(&dir.join("afterschool.db")).map_err(|e| {
                 // 자료 파일을 열지 못하면 더 진행할 수 없다. 이유를 그대로 남긴다.
+                log::error!("자료 파일 열기 실패: {} ({:?})", e.message, e.detail);
                 std::io::Error::new(
                     std::io::ErrorKind::Other,
                     format!("{} ({})", e.message, e.detail.unwrap_or_default()),
                 )
             })?;
+
+            // 앱을 켤 때 자동 백업을 남긴다. 실패해도 앱은 계속 뜬다 —
+            // 백업을 못 만든 것 때문에 업무를 못 하면 더 손해다.
+            match db.backup(BackupKind::Startup) {
+                Ok(f) => log::info!("시작 자동백업: {}", f.name),
+                Err(e) => log::warn!("시작 자동백업 실패(계속 진행): {}", e.message),
+            }
+
             app.manage(db);
             app.manage(Stage::default());
             Ok(())
@@ -45,6 +67,13 @@ pub fn run() {
             commands::app::open_folder,
             commands::app::get_setting,
             commands::app::set_setting,
+            commands::system::app_info,
+            commands::system::backup_create,
+            commands::system::backup_list,
+            commands::system::backup_delete,
+            commands::system::backup_inspect,
+            commands::system::backup_restore,
+            commands::system::backup_restore_file,
             commands::year::year_list,
             commands::year::year_create,
             commands::year::year_update,
@@ -84,6 +113,7 @@ pub fn run() {
             commands::enrollment::enrollment_apply_fees,
             commands::enrollment::change_log_list,
             commands::enrollment::student_detail,
+            commands::enrollment::enrollment_delete_all,
             commands::policy::policy_list,
             commands::policy::policy_save,
             commands::settle::settlement_status,
@@ -114,3 +144,7 @@ pub fn run() {
         .run(tauri::generate_context!())
         .expect("앱을 시작하지 못했습니다");
 }
+
+#[cfg(test)]
+#[path = "version_tests.rs"]
+mod version_tests;

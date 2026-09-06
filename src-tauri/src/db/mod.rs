@@ -3,6 +3,7 @@
 //! 1인 사용 데스크톱 앱이므로 커넥션 풀 대신 `Mutex<Connection>` 하나로 충분하다.
 //! 모든 DB 접근은 `Db::read` / `Db::write`를 통해서만 이루어진다.
 
+pub mod backup;
 pub mod migrate;
 
 use std::path::{Path, PathBuf};
@@ -67,6 +68,10 @@ impl Db {
 
     pub fn export_dir(&self) -> PathBuf {
         self.data_dir().join("exports")
+    }
+
+    pub fn log_dir(&self) -> PathBuf {
+        self.data_dir().join("logs")
     }
 
     /// 읽기 전용 작업.

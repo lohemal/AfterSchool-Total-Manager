@@ -14,7 +14,7 @@ import { ApplyFeesModal } from '@/components/ApplyFeesModal'
 import { cmp, DataTable, type Column } from '@/components/DataTable'
 import { EnrollmentModal } from '@/components/EnrollmentModal'
 import { ExcelTools } from '@/components/ExcelTools'
-import { Modal } from '@/components/Modal'
+import { Confirm, Modal } from '@/components/Modal'
 import { useToast } from '@/components/Toast'
 import { Button, Card, Empty, Field, Input, Notice, Search, Select } from '@/components/ui'
 import { api, errorMessage } from '@/ipc/api'
@@ -40,6 +40,7 @@ export function RosterPage() {
   const [cancelling, setCancelling] = useState<Enrollment | null>(null)
   const [restoring, setRestoring] = useState<Enrollment | null>(null)
   const [applying, setApplying] = useState(false)
+  const [deletingAll, setDeletingAll] = useState(false)
 
   const filter: EnrollmentFilter = useMemo(
     () => ({
@@ -81,6 +82,18 @@ export function RosterPage() {
   }, [all.data, grade])
 
   const one = selected.length === 1 ? list.data?.find((e) => e.id === selected[0]) : undefined
+
+  const toast = useToast()
+  const deleteAll = useMutation({
+    mutationFn: () => api.enrollmentDeleteAll(wsId!),
+    onSuccess: (r) => {
+      setDeletingAll(false)
+      setSelected([])
+      toast.ok(`수강 자료 ${r.deleted}건을 지웠습니다. 삭제 전 자료는 ${r.backup} 에 있습니다.`)
+      void qc.invalidateQueries()
+    },
+    onError: (e) => toast.bad(errorMessage(e)),
+  })
 
   if (wsId === null) {
     return (
@@ -226,6 +239,9 @@ export function RosterPage() {
             </Button>
             <Button small onClick={() => setApplying(true)}>
               부서금액 반영
+            </Button>
+            <Button small variant="danger" onClick={() => setDeletingAll(true)}>
+              전체 삭제
             </Button>
           </>
         }
@@ -385,6 +401,30 @@ export function RosterPage() {
             setSelected([])
             void qc.invalidateQueries()
           }}
+        />
+      )}
+
+      {deletingAll && (
+        <Confirm
+          danger
+          title="수강 자료 전체 삭제"
+          confirmText="모두 삭제"
+          message={
+            <>
+              이 작업은 <b>{app.workspace?.name}</b> 작업공간의 수강 자료{' '}
+              <b>{(all.data ?? []).length}건</b>을 모두 삭제합니다.
+              <div style={{ marginTop: 8, lineHeight: 1.9 }}>
+                취소 상태인 수강까지 함께 사라지고, 금액과 변경 대상 기록도 지워집니다.
+                <br />학생정보와 부서정보는 그대로 남습니다.
+              </div>
+              <div style={{ marginTop: 10 }}>
+                삭제 직전에 <b>자동으로 백업</b>됩니다. 다른 작업공간의 자료는 그대로입니다.
+              </div>
+            </>
+          }
+          busy={deleteAll.isPending}
+          onConfirm={() => deleteAll.mutate()}
+          onClose={() => setDeletingAll(false)}
         />
       )}
 

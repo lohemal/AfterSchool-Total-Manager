@@ -1052,3 +1052,27 @@ pub fn active_exists(
     )?;
     Ok(n > 0)
 }
+
+/// 이 작업공간의 수강 자료를 모두 지운다 (요구사항 §30·§7).
+///
+/// 취소 상태까지 함께 사라지므로 **명령 계층에서 자동백업을 남긴 뒤**에만 부른다.
+pub fn delete_all(conn: &Connection, workspace_id: i64) -> AppResult<usize> {
+    let n = conn.execute(
+        "DELETE FROM enrollment WHERE workspace_id = ?1",
+        params![workspace_id],
+    )?;
+    let year_id = year_of_workspace(conn, workspace_id)?;
+    log::write(
+        conn,
+        year_id,
+        Some(workspace_id),
+        log::ENROLL_CANCEL,
+        None,
+        None,
+        "수강 자료 전체",
+        &format!("{n}건"),
+        "삭제",
+        "전체 삭제",
+    )?;
+    Ok(n)
+}
