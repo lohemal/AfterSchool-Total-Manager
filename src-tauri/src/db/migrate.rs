@@ -32,6 +32,11 @@ const MIGRATIONS: &[Migration] = &[
         name: "002_change_log_target",
         sql: include_str!("../../migrations/002_change_log_target.sql"),
     },
+    Migration {
+        version: 3,
+        name: "003_settlement_budget",
+        sql: include_str!("../../migrations/003_settlement_budget.sql"),
+    },
 ];
 
 pub fn latest_version() -> i32 {

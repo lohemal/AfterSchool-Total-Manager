@@ -7,7 +7,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::domain::parse_grades;
 use crate::error::{AppError, AppResult};
-use crate::model::{Period, Policy};
+use crate::model::{Grant, GrantInput, Period, Policy};
 use crate::repo::{check_date, required_text};
 
 pub fn get(conn: &Connection, year_id: i64, program: &str) -> AppResult<Policy> {
@@ -178,4 +178,81 @@ pub fn limit_notice(policy: &Policy) -> Option<String> {
             sum, policy.annual_limit
         ))
     }
+}
+
+// ─────────────────────────────────────────────── 학생별 예외 한도
+
+/// `period_id`가 NULL이면 **연간 한도**를, 값이 있으면 **그 기간 한도**를 대신한다.
+/// 둘은 서로 독립이며 한 학생이 둘 다 가질 수 있다 (설계안 4-2).
+pub fn grant_list(conn: &Connection, year_id: i64, program: &str) -> AppResult<Vec<Grant>> {
+    let mut st = conn.prepare(
+        "SELECT g.id, g.student_id, s.grade, s.class_no, s.student_no, s.name,
+                g.program, g.period_id, COALESCE(p.name, ''), g.amount, g.reason
+           FROM support_grant g
+           JOIN student s ON s.id = g.student_id
+           LEFT JOIN support_period p ON p.id = g.period_id
+          WHERE g.year_id = ?1 AND g.program = ?2
+          ORDER BY s.grade, s.class_no, s.student_no, COALESCE(p.seq, 0)",
+    )?;
+    let rows = st
+        .query_map(params![year_id, program], |r| {
+            Ok(Grant {
+                id: r.get(0)?,
+                student_id: r.get(1)?,
+                grade: r.get(2)?,
+                class_no: r.get(3)?,
+                student_no: r.get(4)?,
+                name: r.get(5)?,
+                program: r.get(6)?,
+                period_id: r.get(7)?,
+                period_name: r.get(8)?,
+                amount: r.get(9)?,
+                reason: r.get(10)?,
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(rows)
+}
+
+pub fn grant_save(conn: &Connection, year_id: i64, input: &GrantInput) -> AppResult<i64> {
+    if input.amount < 0 {
+        return Err(AppError::invalid("예외 한도는 0원 이상이어야 합니다."));
+    }
+    if !matches!(input.program.as_str(), "VOUCHER" | "FREE_VOUCHER") {
+        return Err(AppError::invalid("알 수 없는 지원제도입니다."));
+    }
+    conn.execute(
+        "INSERT INTO support_grant (year_id, student_id, program, period_id, amount, reason)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+         ON CONFLICT(year_id, student_id, program, IFNULL(period_id, 0))
+           DO UPDATE SET amount = excluded.amount,
+                         reason = excluded.reason,
+                         updated_at = datetime('now', 'localtime')",
+        params![
+            year_id,
+            input.student_id,
+            input.program,
+            input.period_id,
+            input.amount,
+            input.reason.clone().unwrap_or_default()
+        ],
+    )?;
+    Ok(conn
+        .query_row(
+            "SELECT id FROM support_grant
+              WHERE year_id = ?1 AND student_id = ?2 AND program = ?3
+                AND IFNULL(period_id, 0) = IFNULL(?4, 0)",
+            params![year_id, input.student_id, input.program, input.period_id],
+            |r| r.get(0),
+        )
+        .optional()?
+        .unwrap_or(0))
+}
+
+pub fn grant_delete(conn: &Connection, ids: &[i64]) -> AppResult<usize> {
+    let mut n = 0;
+    for id in ids {
+        n += conn.execute("DELETE FROM support_grant WHERE id = ?1", params![id])?;
+    }
+    Ok(n)
 }

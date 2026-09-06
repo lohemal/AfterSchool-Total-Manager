@@ -12,7 +12,11 @@ import { ChangeLogPage } from '@/pages/ChangeLogPage'
 import { DashboardPage } from '@/pages/DashboardPage'
 import { DepartmentsPage } from '@/pages/DepartmentsPage'
 import { EligibilityPage } from '@/pages/EligibilityPage'
+import { PolicyPage } from '@/pages/PolicyPage'
+import { FreeVoucherPage, VoucherPage } from '@/pages/ProgramResultPage'
 import { RosterPage } from '@/pages/RosterPage'
+import { SelfPayPage } from '@/pages/SelfPayPage'
+import { SettlementPage } from '@/pages/SettlementPage'
 import { Soon } from '@/pages/Soon'
 import { StudentDetailPage } from '@/pages/StudentDetailPage'
 import { StudentsPage } from '@/pages/StudentsPage'
@@ -79,44 +83,11 @@ function Shell({ onYearCreated }: { onYearCreated: () => void }) {
           <Route path="roster" element={<Guard>{<RosterPage />}</Guard>} />
           <Route path="student-detail" element={<Guard>{<StudentDetailPage />}</Guard>} />
           <Route path="changes" element={<Guard>{<ChangeLogPage />}</Guard>} />
-          <Route
-            path="settlement"
-            element={
-              <Soon
-                title="정산 데이터 생성"
-                phase="Phase 3"
-                plan={[
-                  '버튼을 눌렀을 때만 계산합니다 (화면을 열 때마다 계산하지 않습니다)',
-                  '지원기간·이월정책을 반영한 사용 가능액 계산',
-                  '부서 우선순위 + 비용항목 우선순위 차감',
-                  '마지막 생성 시각과 낡음 여부 표시',
-                  '항목 × 재원 요약표',
-                ]}
-              />
-            }
-          />
-          <Route
-            path="self-pay"
-            element={<Soon title="수익자" phase="Phase 3" plan={['정산 결과 조회', 'Excel 내려받기']} />}
-          />
-          <Route
-            path="voucher"
-            element={
-              <Soon
-                title="방과후 이용권"
-                phase="Phase 3"
-                plan={[
-                  '사용금액 · 초과금액',
-                  '연간 한도 · 지원기간 한도 · 이월액 · 이전 사용 · 잔액',
-                  'Excel 내려받기',
-                ]}
-              />
-            }
-          />
-          <Route
-            path="free-voucher"
-            element={<Soon title="자유수강권" phase="Phase 3" plan={['정산 결과 조회', 'Excel 내려받기']} />}
-          />
+          <Route path="settlement" element={<Guard>{<SettlementPage />}</Guard>} />
+          <Route path="self-pay" element={<Guard>{<SelfPayPage />}</Guard>} />
+          <Route path="voucher" element={<Guard>{<VoucherPage />}</Guard>} />
+          <Route path="free-voucher" element={<Guard>{<FreeVoucherPage />}</Guard>} />
+          <Route path="policy" element={<Guard>{<PolicyPage />}</Guard>} />
           <Route
             path="proposal"
             element={
@@ -127,23 +98,6 @@ function Shell({ onYearCreated }: { onYearCreated: () => void }) {
                   '부서 × 재원 집계 (학생 기준이 아닙니다)',
                   '강사료 · 수용비 · 교재비 · 재료비 · 교재재료비 통합',
                   '열 이름표는 대상학년 설정에서 자동으로 만듭니다',
-                ]}
-              />
-            }
-          />
-          <Route
-            path="policy"
-            element={
-              <Soon
-                title="학년도 지원금 설정"
-                phase="Phase 3"
-                plan={[
-                  '연간 지원한도',
-                  '지원기간(1학기·2학기 등)과 기간별 한도',
-                  '미사용 지원금 처리 — 이월 / 소멸',
-                  '대상 학년(복수 지정 가능)',
-                  '학생별 예외 한도',
-                  '부서 · 비용항목 차감 우선순위',
                 ]}
               />
             }

@@ -7,5 +7,6 @@ pub mod eligibility;
 pub mod enrollment;
 pub mod excel;
 pub mod policy;
+pub mod settle;
 pub mod student;
 pub mod year;

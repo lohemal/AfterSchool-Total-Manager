@@ -22,13 +22,23 @@ import type {
   Fee,
   FeeDiffView,
   FeePick,
+  GenerateResult,
+  Grant,
+  GrantInput,
   ImportKind,
   ImportPreview,
   ImportResult,
+  Issue,
   Period,
   PolicyView,
+  PriorityRow,
   ProgramCode,
+  ProgramRow,
   RowIssue,
+  SelfPayRow,
+  SettlementStatus,
+  Summary,
+  SupportState,
   Student,
   StudentDetail,
   StudentFeeEdit,
@@ -180,6 +190,39 @@ export const api = {
     }),
   studentDetail: (yearId: number, studentId: number) =>
     invoke<StudentDetail>('student_detail', { yearId, studentId }),
+
+  // 정산 (Phase 3)
+  settlementStatus: (workspaceId: number) =>
+    invoke<SettlementStatus>('settlement_status', { workspaceId }),
+  settlementValidate: (workspaceId: number) =>
+    invoke<Issue[]>('settlement_validate', { workspaceId }),
+  /** 사람이 눌렀을 때만 부른다. 화면을 열 때 부르지 않는다. */
+  settlementGenerate: (workspaceId: number) =>
+    invoke<GenerateResult>('settlement_generate', { workspaceId }),
+  settlementSummary: (workspaceId: number) =>
+    invoke<Summary | null>('settlement_summary', { workspaceId }),
+  settlementSelfPay: (workspaceId: number) =>
+    invoke<SelfPayRow[]>('settlement_self_pay', { workspaceId }),
+  settlementProgram: (workspaceId: number, program: ProgramCode) =>
+    invoke<ProgramRow[]>('settlement_program', { workspaceId, program }),
+  settlementStudentSupports: (workspaceId: number, studentId: number) =>
+    invoke<SupportState[]>('settlement_student_supports', { workspaceId, studentId }),
+
+  // 차감 우선순위
+  priorityDeptList: (workspaceId: number) =>
+    invoke<PriorityRow[]>('priority_dept_list', { workspaceId }),
+  priorityDeptSave: (workspaceId: number, order: number[]) =>
+    invoke<void>('priority_dept_save', { workspaceId, order }),
+  priorityItemList: (workspaceId: number) =>
+    invoke<PriorityRow[]>('priority_item_list', { workspaceId }),
+  priorityItemSave: (workspaceId: number, order: string[]) =>
+    invoke<void>('priority_item_save', { workspaceId, order }),
+
+  // 학생별 예외 한도
+  grantList: (yearId: number, program: ProgramCode) =>
+    invoke<Grant[]>('grant_list', { yearId, program }),
+  grantSave: (yearId: number, input: GrantInput) => invoke<number>('grant_save', { yearId, input }),
+  grantDelete: (ids: number[]) => invoke<number>('grant_delete', { ids }),
 
   // Excel
   excelTemplate: (kind: ImportKind) => invoke<ExportResult>('excel_template', { kind }),

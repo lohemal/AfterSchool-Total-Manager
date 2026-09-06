@@ -41,6 +41,8 @@ pub struct Availability {
     pub used_prior_periods: i64,
     /// 현재 기간 안에서 앞선 작업공간들이 쓴 금액
     pub used_in_period_before: i64,
+    /// 어느 지원기간에도 속하지 않는 앞선 작업공간의 사용액 (연간 몫에만 반영)
+    pub used_outside_before: i64,
     /// 연간 누적 사용액 (이번 작업공간 제외)
     pub used_all_before: i64,
     /// 이번 작업공간에서 쓸 수 있는 금액
@@ -53,14 +55,18 @@ pub struct Availability {
 ///
 /// * `periods` — seq 오름차순. 현재 기간도 포함되어 있어야 한다.
 /// * `current_seq` — 이번 작업공간이 속한 기간의 seq. `None`이면 지원기간 미설정.
-/// * `used_in_period_before` — 현재 기간 안에서 `seq`가 앞선 작업공간들의 사용액 합.
+/// * `used_in_period_before` — 현재 기간 안에서 앞선 작업공간들의 사용액 합.
 ///   (기간 미설정이면 그 학년도의 앞선 작업공간 전체 사용액)
+/// * `used_outside_before` — 어느 지원기간에도 속하지 않는 앞선 작업공간의 사용액.
+///   기간 몫에는 넣지 않고 **연간 몫에서만** 뺀다. 기간 밖 운영은 설정 실수일
+///   가능성이 높지만, 그 금액이 연간 한도에서 사라지면 안 되기 때문이다.
 pub fn availability(
     annual_limit: i64,
     carryover: bool,
     periods: &[PeriodRow],
     current_seq: Option<i64>,
     used_in_period_before: i64,
+    used_outside_before: i64,
 ) -> Availability {
     let (period_limit, prior_limits, prior_used) = match current_seq {
         Some(cur) => {
@@ -86,7 +92,7 @@ pub fn availability(
         0
     };
 
-    let used_all_before = prior_used + used_in_period_before;
+    let used_all_before = prior_used + used_in_period_before + used_outside_before;
     let period_share = period_limit + carry_in - used_in_period_before;
     let annual_share = annual_limit - used_all_before;
     let available = period_share.min(annual_share).max(0);
@@ -97,6 +103,7 @@ pub fn availability(
         carry_in,
         used_prior_periods: prior_used,
         used_in_period_before,
+        used_outside_before,
         used_all_before,
         available,
         capped_by_annual: annual_share < period_share,
@@ -152,7 +159,7 @@ mod tests {
     #[test]
     fn 소멸정책_2학기_가용액은_기간한도_그대로() {
         let periods = [p(1, 250_000, 200_000), p(2, 250_000, 0)];
-        let a = availability(500_000, false, &periods, Some(2), 0);
+        let a = availability(500_000, false, &periods, Some(2), 0, 0);
         assert_eq!(a.carry_in, 0);
         assert_eq!(a.available, 250_000);
     }
@@ -161,7 +168,7 @@ mod tests {
     #[test]
     fn 이월정책_미사용액이_다음기간으로_넘어간다() {
         let periods = [p(1, 250_000, 200_000), p(2, 250_000, 0)];
-        let a = availability(500_000, true, &periods, Some(2), 0);
+        let a = availability(500_000, true, &periods, Some(2), 0, 0);
         assert_eq!(a.carry_in, 50_000);
         assert_eq!(a.available, 300_000);
     }
@@ -170,13 +177,13 @@ mod tests {
     fn 이월해도_연간한도를_넘지_못한다() {
         // 1학기를 한 푼도 안 썼다 → 이월 250,000, 기간 몫 500,000
         let periods = [p(1, 250_000, 0), p(2, 250_000, 0)];
-        let a = availability(500_000, true, &periods, Some(2), 0);
+        let a = availability(500_000, true, &periods, Some(2), 0, 0);
         assert_eq!(a.carry_in, 250_000);
         assert_eq!(a.available, 500_000); // 연간 한도와 같아서 잘리지 않음
         assert!(!a.capped_by_annual);
 
         // 연간 한도만 450,000인 학교라면 기간 몫 500,000이 연간에 잘린다
-        let b = availability(450_000, true, &periods, Some(2), 0);
+        let b = availability(450_000, true, &periods, Some(2), 0, 0);
         assert_eq!(b.available, 450_000);
         assert!(b.capped_by_annual);
     }
@@ -184,10 +191,10 @@ mod tests {
     /// 선행 기간을 다시 정산해 사용액이 늘면 이월액이 자동으로 줄어든다.
     #[test]
     fn 선행기간_재정산이_이월액에_반영된다() {
-        let before = availability(500_000, true, &[p(1, 250_000, 200_000), p(2, 250_000, 0)], Some(2), 0);
+        let before = availability(500_000, true, &[p(1, 250_000, 200_000), p(2, 250_000, 0)], Some(2), 0, 0);
         assert_eq!(before.available, 300_000);
 
-        let after = availability(500_000, true, &[p(1, 250_000, 230_000), p(2, 250_000, 0)], Some(2), 0);
+        let after = availability(500_000, true, &[p(1, 250_000, 230_000), p(2, 250_000, 0)], Some(2), 0, 0);
         assert_eq!(after.carry_in, 20_000);
         assert_eq!(after.available, 270_000);
     }
@@ -197,14 +204,14 @@ mod tests {
     fn 기간안_작업공간이_여럿이면_같은_한도를_나눠쓴다() {
         let periods = [p(1, 250_000, 0)];
         // 3월에 100,000, 4월에 60,000을 이미 썼고 지금 5월을 정산한다
-        let a = availability(500_000, false, &periods, Some(1), 160_000);
+        let a = availability(500_000, false, &periods, Some(1), 160_000, 0);
         assert_eq!(a.available, 90_000);
         assert_eq!(a.used_all_before, 160_000);
     }
 
     #[test]
     fn 지원기간을_만들지_않으면_연간한도_하나로_동작한다() {
-        let a = availability(500_000, false, &[], None, 120_000);
+        let a = availability(500_000, false, &[], None, 120_000, 0);
         assert_eq!(a.period_limit, 500_000);
         assert_eq!(a.carry_in, 0);
         assert_eq!(a.available, 380_000);
@@ -213,19 +220,35 @@ mod tests {
     #[test]
     fn 한도를_이미_다_썼으면_가용액은_0이고_음수가_되지_않는다() {
         let periods = [p(1, 250_000, 250_000)];
-        let a = availability(500_000, false, &periods, Some(1), 250_000);
+        let a = availability(500_000, false, &periods, Some(1), 250_000, 0);
         assert_eq!(a.available, 0);
 
         // 한도를 사후에 낮춰 이전 사용액이 한도를 넘긴 경우
         let periods = [p(1, 100_000, 0)];
-        let b = availability(200_000, false, &periods, Some(1), 150_000);
+        let b = availability(200_000, false, &periods, Some(1), 150_000, 0);
         assert_eq!(b.available, 0);
+    }
+
+    #[test]
+    fn 기간_밖_작업공간의_사용액은_연간_몫에서만_뺀다() {
+        // 어느 지원기간에도 속하지 않는 작업공간에서 100,000을 썼다.
+        // 1학기 몫은 그대로 250,000이지만, 연간 몫은 400,000으로 줄어든다.
+        let periods = [p(1, 250_000, 0), p(2, 250_000, 0)];
+        let a = availability(500_000, false, &periods, Some(1), 0, 100_000);
+        assert_eq!(a.period_limit, 250_000);
+        assert_eq!(a.available, 250_000, "기간 몫이 더 작으므로 그대로");
+        assert_eq!(a.used_all_before, 100_000, "연간 누적에는 잡힌다");
+
+        // 연간 몫이 더 작아지는 지점까지 밀면 연간에 잘린다
+        let b = availability(500_000, false, &periods, Some(1), 0, 300_000);
+        assert_eq!(b.available, 200_000);
+        assert!(b.capped_by_annual);
     }
 
     #[test]
     fn 기간이_없는_seq를_받으면_연간한도로_대체한다() {
         // 정책은 있는데 기간 목록에 그 seq가 빠진 비정상 상태 — 죽지 않고 연간으로 처리
-        let a = availability(500_000, false, &[p(1, 250_000, 0)], Some(9), 0);
+        let a = availability(500_000, false, &[p(1, 250_000, 0)], Some(9), 0, 0);
         assert_eq!(a.period_limit, 500_000);
     }
 

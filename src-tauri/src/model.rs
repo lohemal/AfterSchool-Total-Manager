@@ -330,3 +330,191 @@ pub struct WorkspaceEnrollments {
     /// 이 작업공간에서 수강 중(ACTIVE)인 금액 합계
     pub active_total: i64,
 }
+
+// ─────────────────────────────────────────────── Phase 3 — 정산
+
+/// 정산 생성 전 검사 결과 한 줄.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Issue {
+    /// `ERROR`면 정산을 진행할 수 없다. `WARN`이면 확인 후 진행할 수 있다.
+    pub level: String,
+    pub code: String,
+    pub message: String,
+}
+
+/// 저장된 정산이 지금 자료와 견주어 최신인가 (설계안 8장).
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SettlementStatus {
+    /// `NONE` | `FRESH` | `STALE_DATA` | `STALE_YEAR` | `STALE_PRIOR`
+    pub state: String,
+    pub message: String,
+    pub settlement_id: Option<i64>,
+    pub created_at: Option<String>,
+    pub program_order: String,
+    /// 낡음의 원인이 선행 작업공간이라면 그 이름
+    pub prior_name: Option<String>,
+    /// 그 선행 작업공간이 이전 지원기간인가
+    pub prior_is_earlier_period: bool,
+}
+
+impl SettlementStatus {
+    pub fn is_fresh(&self) -> bool {
+        self.state == "FRESH"
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GenerateResult {
+    pub settlement_id: i64,
+    pub created_at: String,
+    pub students: i64,
+    pub allocs: i64,
+    /// 배분한 총액 (= 원본 charge 총액)
+    pub total: i64,
+    pub warnings: Vec<Issue>,
+}
+
+/// 항목 × 재원 요약 한 줄 (설계안 9-1).
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SummaryRow {
+    pub item_code: String,
+    pub item_name: String,
+    pub self_pay: i64,
+    pub voucher: i64,
+    pub voucher_over: i64,
+    pub free_voucher: i64,
+    pub total: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Summary {
+    pub rows: Vec<SummaryRow>,
+    pub total: SummaryRow,
+    /// 원본 charge 합계 — 아래 `balanced`가 false면 화면에 붉게 띄운다
+    pub charge_total: i64,
+    pub balanced: bool,
+    pub created_at: String,
+}
+
+/// 정산 시점의 학생별 지원금 상태 (`settlement_budget`).
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BudgetView {
+    pub program: String,
+    pub annual_limit: i64,
+    pub period_name: String,
+    pub period_limit: i64,
+    pub carryover: bool,
+    pub carry_in: i64,
+    pub used_prior_periods: i64,
+    pub used_in_period_before: i64,
+    pub used_all_before: i64,
+    pub capped_by_annual: bool,
+    /// 이번 작업공간에서 쓸 수 있었던 금액
+    pub available: i64,
+    /// 이번 작업공간에서 실제로 쓴 금액
+    pub used_now: i64,
+    /// available − used_now
+    pub period_left: i64,
+    /// used_all_before + used_now
+    pub annual_used: i64,
+    /// annual_limit − annual_used
+    pub annual_left: i64,
+}
+
+/// 수익자 탭 한 줄 — 학생 × 부서 (요구사항 §16).
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SelfPayRow {
+    pub student_id: i64,
+    pub grade: i64,
+    pub class_no: i64,
+    pub student_no: i64,
+    pub name: String,
+    pub department_id: i64,
+    pub dept_label: String,
+    /// 항목별 학부모 부담액 (SELF_PAY + VOUCHER_OVER)
+    pub fees: Vec<Fee>,
+    pub total: i64,
+    /// 그중 일반 수익자 부담금
+    pub self_pay: i64,
+    /// 그중 이용권 초과금
+    pub voucher_over: i64,
+    // 사연별 — 화면에서 구분해 보여 준다
+    pub origin_plain: i64,
+    pub origin_voucher: i64,
+    pub origin_free: i64,
+}
+
+/// 이용권 · 자유수강권 탭 한 줄 — 학생 하나 (요구사항 §17·§18).
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProgramRow {
+    pub student_id: i64,
+    pub grade: i64,
+    pub class_no: i64,
+    pub student_no: i64,
+    pub name: String,
+    /// 지원받은 금액 (항목별)
+    pub used: Vec<Fee>,
+    pub used_total: i64,
+    /// 초과금 (이용권만 해당. 자유수강권은 비어 있고 수익자 탭으로 간다)
+    pub over: Vec<Fee>,
+    pub over_total: i64,
+    pub budget: Option<BudgetView>,
+}
+
+/// 학생 상세정보의 지원제도 칸 (요구사항 §19).
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SupportState {
+    pub program: String,
+    pub program_label: String,
+    /// `NONE`(해당없음) | `BEFORE`(정산 전) | `STALE`(재정산 필요) | `OK`
+    pub state: String,
+    pub budget: Option<BudgetView>,
+}
+
+/// 차감 우선순위 편집용 한 줄.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PriorityRow {
+    pub key: String,
+    pub label: String,
+    pub sort_order: i64,
+    /// 부서 우선순위에서만 쓴다 — 이용권 대상자가 실제 수강 중인 인원
+    pub voucher_students: i64,
+}
+
+/// 학생별 예외 한도 (`support_grant`).
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Grant {
+    pub id: i64,
+    pub student_id: i64,
+    pub grade: i64,
+    pub class_no: i64,
+    pub student_no: i64,
+    pub name: String,
+    pub program: String,
+    /// null이면 연간 한도 예외, 값이 있으면 그 지원기간의 한도 예외
+    pub period_id: Option<i64>,
+    pub period_name: String,
+    pub amount: i64,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GrantInput {
+    pub student_id: i64,
+    pub program: String,
+    pub period_id: Option<i64>,
+    pub amount: i64,
+    pub reason: Option<String>,
+}

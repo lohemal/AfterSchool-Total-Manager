@@ -8,7 +8,9 @@ pub mod department;
 pub mod eligibility;
 pub mod enrollment;
 pub mod policy;
+pub mod priority;
 pub mod setting;
+pub mod settle;
 pub mod student;
 pub mod year;
 
@@ -57,3 +59,6 @@ mod flow_tests;
 
 #[cfg(test)]
 mod enrollment_tests;
+
+#[cfg(test)]
+mod settle_tests;

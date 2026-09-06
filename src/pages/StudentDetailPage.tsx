@@ -4,8 +4,8 @@
  * 수강생 명단에서 학생을 눌렀다고 이 화면이 저절로 채워지지 않는다.
  * 여기서 직접 조회한다. 학년·반·번호·이름 가운데 **하나만 넣어도** 찾는다.
  *
- * 지원금 사용액·잔액은 보여 주지 않는다 — 정산을 아직 실행하지 않았기 때문이다.
- * 없는 숫자를 지어내면 사람이 그것을 믿게 된다. Phase 3에서 연결한다.
+ * 지원금 사용액·잔액은 **그 작업공간의 정산이 최신일 때만** 보여 준다.
+ * 정산 전·재정산 필요·해당없음을 분명히 갈라 쓴다 — 낡은 숫자를 최신처럼 보이면 안 된다.
  */
 
 import { useQuery } from '@tanstack/react-query'
@@ -228,7 +228,6 @@ export function StudentDetailPage() {
                     <th style={{ width: 160 }}>제도</th>
                     <th style={{ width: 110 }}>자격</th>
                     <th className="left">적용기간</th>
-                    <th style={{ width: 220 }}>지원금 사용액 · 잔액</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -256,15 +255,14 @@ export function StudentDetailPage() {
                           <span className="muted">해당없음</span>
                         )}
                       </td>
-                      <td className="muted">정산 후 표시 (Phase 3)</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
             <div className="hint" style={{ marginTop: 8 }}>
-              지원금 사용액과 잔액은 정산을 실행해야 나옵니다. 아직 계산하지 않은 값을 임의로
-              보여 주지 않습니다.
+              지원금 사용액과 잔액은 아래 작업공간별 내역에서 봅니다. 그 작업공간의 정산이
+              최신일 때만 숫자가 나옵니다.
             </div>
           </Card>
 
@@ -332,6 +330,9 @@ export function StudentDetailPage() {
                     </tbody>
                   </table>
                 </div>
+                <div style={{ padding: 12 }}>
+                  <SupportPanel workspaceId={w.workspaceId} studentId={d.student.id} />
+                </div>
               </Card>
             ))
           )}
@@ -342,6 +343,76 @@ export function StudentDetailPage() {
           </Notice>
         </>
       )}
+    </div>
+  )
+}
+
+/**
+ * 작업공간 하나의 지원금 상태 (요구사항 §19).
+ *
+ * 네 가지를 분명히 구분한다 —
+ *   해당없음 · 정산 전 · 재정산 필요 · (최신일 때만) 실제 숫자
+ *
+ * 낡은 정산의 숫자를 최신처럼 보여 주지 않는 것이 이 칸의 핵심이다.
+ */
+function SupportPanel({ workspaceId, studentId }: { workspaceId: number; studentId: number }) {
+  const supports = useQuery({
+    queryKey: ['student-supports', workspaceId, studentId],
+    queryFn: () => api.settlementStudentSupports(workspaceId, studentId),
+  })
+
+  if (supports.isLoading) return <div className="hint">지원금 상태를 확인하는 중…</div>
+  const rows = supports.data ?? []
+
+  return (
+    <div className="tableWrap" style={{ border: '1px solid var(--gray-200)' }}>
+      <table className="table">
+        <thead>
+          <tr>
+            <th style={{ width: 150 }}>지원제도</th>
+            <th style={{ width: 118 }}>상태</th>
+            <th style={{ width: 96 }}>지원기간</th>
+            <th className="num" style={{ width: 116 }}>
+              사용 가능액
+            </th>
+            <th className="num" style={{ width: 104 }}>
+              이번 사용액
+            </th>
+            <th className="num" style={{ width: 104 }}>
+              기간 잔액
+            </th>
+            <th className="num" style={{ width: 110 }}>
+              연간 누적
+            </th>
+            <th className="num" style={{ width: 104 }}>
+              연간 잔액
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((s) => {
+            const b = s.budget
+            const blank = <span className="muted">—</span>
+            return (
+              <tr key={s.program}>
+                <td>{s.programLabel}</td>
+                <td>
+                  {s.state === 'NONE' && <span className="tag tag--plain">해당없음</span>}
+                  {s.state === 'BEFORE' && <span className="tag tag--voucher">정산 전</span>}
+                  {s.state === 'STALE' && <span className="tag tag--warn">재정산 필요</span>}
+                  {s.state === 'OK' && <span className="tag tag--free">최신</span>}
+                </td>
+                <td>{b ? b.periodName || '연간' : blank}</td>
+                <td className="num">{b ? won(b.available) : blank}</td>
+                <td className="num">{b ? <b>{won(b.usedNow)}</b> : blank}</td>
+                <td className="num">{b ? won(b.periodLeft) : blank}</td>
+                <td className="num">{b ? won(b.annualUsed) : blank}</td>
+                <td className="num">{b ? won(b.annualLeft) : blank}</td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
     </div>
   )
 }

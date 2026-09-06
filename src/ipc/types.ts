@@ -304,3 +304,139 @@ export interface StudentDetail {
   supports: SupportView[]
   workspaces: WorkspaceEnrollments[]
 }
+
+// ─────────────────────────────────────────────── Phase 3 — 정산
+
+export interface Issue {
+  /** ERROR면 정산할 수 없고, WARN이면 확인 후 진행할 수 있다 */
+  level: 'ERROR' | 'WARN'
+  code: string
+  message: string
+}
+
+export type SettleState = 'NONE' | 'FRESH' | 'STALE_DATA' | 'STALE_YEAR' | 'STALE_PRIOR'
+
+export interface SettlementStatus {
+  state: SettleState
+  message: string
+  settlementId: number | null
+  createdAt: string | null
+  programOrder: string
+  priorName: string | null
+  priorIsEarlierPeriod: boolean
+}
+
+export interface GenerateResult {
+  settlementId: number
+  createdAt: string
+  students: number
+  allocs: number
+  total: number
+  warnings: Issue[]
+}
+
+export interface SummaryRow {
+  itemCode: string
+  itemName: string
+  selfPay: number
+  voucher: number
+  voucherOver: number
+  freeVoucher: number
+  total: number
+}
+
+export interface Summary {
+  rows: SummaryRow[]
+  total: SummaryRow
+  chargeTotal: number
+  balanced: boolean
+  createdAt: string
+}
+
+export interface BudgetView {
+  program: ProgramCode
+  annualLimit: number
+  periodName: string
+  periodLimit: number
+  carryover: boolean
+  carryIn: number
+  usedPriorPeriods: number
+  usedInPeriodBefore: number
+  usedAllBefore: number
+  cappedByAnnual: boolean
+  available: number
+  usedNow: number
+  periodLeft: number
+  annualUsed: number
+  annualLeft: number
+}
+
+export interface SelfPayRow {
+  studentId: number
+  grade: number
+  classNo: number
+  studentNo: number
+  name: string
+  departmentId: number
+  deptLabel: string
+  fees: Fee[]
+  total: number
+  selfPay: number
+  voucherOver: number
+  originPlain: number
+  originVoucher: number
+  originFree: number
+}
+
+export interface ProgramRow {
+  studentId: number
+  grade: number
+  classNo: number
+  studentNo: number
+  name: string
+  used: Fee[]
+  usedTotal: number
+  over: Fee[]
+  overTotal: number
+  budget: BudgetView | null
+}
+
+/** NONE=해당없음 · BEFORE=정산 전 · STALE=재정산 필요 · OK=최신 */
+export type SupportStateCode = 'NONE' | 'BEFORE' | 'STALE' | 'OK'
+
+export interface SupportState {
+  program: ProgramCode
+  programLabel: string
+  state: SupportStateCode
+  budget: BudgetView | null
+}
+
+export interface PriorityRow {
+  key: string
+  label: string
+  sortOrder: number
+  voucherStudents: number
+}
+
+export interface Grant {
+  id: number
+  studentId: number
+  grade: number
+  classNo: number
+  studentNo: number
+  name: string
+  program: ProgramCode
+  /** null이면 연간 한도 예외, 값이 있으면 그 지원기간의 한도 예외 */
+  periodId: number | null
+  periodName: string
+  amount: number
+  reason: string
+}
+
+export interface GrantInput {
+  studentId: number
+  program: ProgramCode
+  periodId: number | null
+  amount: number
+  reason?: string
+}

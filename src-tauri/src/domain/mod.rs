@@ -3,6 +3,7 @@
 //! 여기 있는 코드는 `rusqlite`를 import하지 않으며, 입력도 출력도 평범한 구조체다.
 //! 그래야 정산 계산을 DB 없이 테스트할 수 있다 (설계안 1장).
 
+pub mod settle;
 pub mod support;
 
 use serde::{Deserialize, Serialize};
@@ -37,6 +38,14 @@ impl Program {
             "VOUCHER" => Some(Program::Voucher),
             "FREE_VOUCHER" => Some(Program::FreeVoucher),
             _ => None,
+        }
+    }
+
+    /// 이 제도로 지원한 금액이 들어가는 재원.
+    pub fn fund(self) -> Fund {
+        match self {
+            Program::Voucher => Fund::Voucher,
+            Program::FreeVoucher => Fund::FreeVoucher,
         }
     }
 

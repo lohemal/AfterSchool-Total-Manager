@@ -35,10 +35,10 @@ const NAV: { group: string | null; items: Item[] }[] = [
   {
     group: '정산 관리',
     items: [
-      { to: '/settlement', label: '정산 데이터 생성', soon: 'Phase 3' },
-      { to: '/self-pay', label: '수익자', soon: 'Phase 3' },
-      { to: '/voucher', label: '방과후 이용권', soon: 'Phase 3' },
-      { to: '/free-voucher', label: '자유수강권', soon: 'Phase 3' },
+      { to: '/settlement', label: '정산 데이터 생성' },
+      { to: '/self-pay', label: '수익자' },
+      { to: '/voucher', label: '방과후 이용권' },
+      { to: '/free-voucher', label: '자유수강권' },
     ],
   },
   {
@@ -48,7 +48,7 @@ const NAV: { group: string | null; items: Item[] }[] = [
   {
     group: '시스템',
     items: [
-      { to: '/policy', label: '학년도 지원금 설정', soon: 'Phase 3' },
+      { to: '/policy', label: '학년도 지원금 설정' },
       { to: '/system', label: '백업·복원·업데이트', soon: 'Phase 5' },
     ],
   },
