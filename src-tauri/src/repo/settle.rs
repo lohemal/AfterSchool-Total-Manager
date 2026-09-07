@@ -15,7 +15,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::domain::settle::{self, Budget, ChargeUnit, Config, StudentInput};
 use crate::domain::support::{self, PeriodRow};
-use crate::domain::{eligibility_active, grade_matches, parse_grades, Fund, Program};
+use crate::domain::{class_no, eligibility_active, grade_matches, parse_grades, Fund, Program};
 use crate::error::{AppError, AppResult};
 use crate::model::{
     BudgetView, CostItem, Fee, GenerateResult, Issue, ProgramRow, SelfPayRow, SettlementStatus,
@@ -976,7 +976,7 @@ pub fn self_pay_rows(
            JOIN department d ON d.id = a.department_id
           WHERE a.settlement_id = ?1 AND a.fund IN ('SELF_PAY', 'VOUCHER_OVER')
           GROUP BY a.student_id, a.department_id, a.item_code, a.fund, a.origin
-          ORDER BY s.grade, s.class_no, s.student_no, d.name, d.class_name",
+          ORDER BY s.grade, s.class_sort, s.class_no, s.student_no, d.name, d.class_name",
     )?;
 
     let mut acc: HashMap<(i64, i64), SelfPayRow> = HashMap::new();
@@ -987,7 +987,7 @@ pub fn self_pay_rows(
         Ok((
             r.get::<_, i64>(0)?,
             r.get::<_, i64>(1)?,
-            r.get::<_, i64>(2)?,
+            r.get::<_, String>(2)?,
             r.get::<_, i64>(3)?,
             r.get::<_, String>(4)?,
             r.get::<_, i64>(5)?,
@@ -1072,19 +1072,19 @@ pub fn program_rows(
            JOIN student s ON s.id = a.student_id
           WHERE a.settlement_id = ?1 AND a.fund IN (?2, ?3)
           GROUP BY a.student_id, a.item_code, a.fund
-          ORDER BY s.grade, s.class_no, s.student_no",
+          ORDER BY s.grade, s.class_sort, s.class_no, s.student_no",
     )?;
 
     let mut used_acc: HashMap<i64, HashMap<String, i64>> = HashMap::new();
     let mut over_acc: HashMap<i64, HashMap<String, i64>> = HashMap::new();
-    let mut info: HashMap<i64, (i64, i64, i64, String)> = HashMap::new();
+    let mut info: HashMap<i64, (i64, String, i64, String)> = HashMap::new();
     let mut order: Vec<i64> = Vec::new();
 
     for row in st.query_map(params![sid, used_fund, over_fund.unwrap_or("")], |r| {
         Ok((
             r.get::<_, i64>(0)?,
             r.get::<_, i64>(1)?,
-            r.get::<_, i64>(2)?,
+            r.get::<_, String>(2)?,
             r.get::<_, i64>(3)?,
             r.get::<_, String>(4)?,
             r.get::<_, String>(5)?,
@@ -1115,7 +1115,7 @@ pub fn program_rows(
         Ok((
             r.get::<_, i64>(0)?,
             r.get::<_, i64>(1)?,
-            r.get::<_, i64>(2)?,
+            r.get::<_, String>(2)?,
             r.get::<_, i64>(3)?,
             r.get::<_, String>(4)?,
         ))
@@ -1155,7 +1155,14 @@ pub fn program_rows(
             }
         })
         .collect();
-    out.sort_by_key(|r| (r.grade, r.class_no, r.student_no, r.student_id));
+    // 숫자 반이 1, 10, 2 로 놓이지 않도록 반 정렬 규칙을 쓴다.
+    out.sort_by(|a, b| {
+        a.grade
+            .cmp(&b.grade)
+            .then(class_no::cmp(&a.class_no, &b.class_no))
+            .then(a.student_no.cmp(&b.student_no))
+            .then(a.student_id.cmp(&b.student_id))
+    });
     Ok(out)
 }
 

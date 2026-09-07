@@ -44,7 +44,7 @@ pub struct WorkspaceInput {
 pub struct Student {
     pub id: i64,
     pub grade: i64,
-    pub class_no: i64,
+    pub class_no: String,
     pub student_no: i64,
     pub name: String,
     pub note: String,
@@ -56,7 +56,7 @@ pub struct Student {
 #[serde(rename_all = "camelCase")]
 pub struct StudentInput {
     pub grade: i64,
-    pub class_no: i64,
+    pub class_no: String,
     pub student_no: i64,
     pub name: String,
     pub note: Option<String>,
@@ -68,7 +68,7 @@ pub struct StudentFilter {
     /// 자격 판정 기준이 되는 작업공간. 없으면 학년도 전체에서 한 번이라도 자격이 있으면 표시
     pub workspace_id: Option<i64>,
     pub grade: Option<i64>,
-    pub class_no: Option<i64>,
+    pub class_no: Option<String>,
     pub student_no: Option<i64>,
     pub name: Option<String>,
     /// 지원유형 필터: `VOUCHER` | `FREE_VOUCHER` | `BOTH` | `NONE`
@@ -89,7 +89,7 @@ pub struct Eligibility {
     pub note: String,
     // 화면 표시용 학생 정보
     pub grade: i64,
-    pub class_no: i64,
+    pub class_no: String,
     pub student_no: i64,
     pub name: String,
     /// 대상학년 정책과 어긋나는가 (자동으로 고치지 않고 경고만 한다 — 설계안 0-3)
@@ -194,7 +194,7 @@ pub struct Enrollment {
     pub department_id: i64,
     // 학생
     pub grade: i64,
-    pub class_no: i64,
+    pub class_no: String,
     pub student_no: i64,
     pub name: String,
     /// 이 작업공간 기간에 유효한 지원제도
@@ -230,7 +230,7 @@ pub struct EnrollmentInput {
 pub struct EnrollmentFilter {
     pub department_id: Option<i64>,
     pub grade: Option<i64>,
-    pub class_no: Option<i64>,
+    pub class_no: Option<String>,
     /// `VOUCHER` | `FREE_VOUCHER` | `BOTH` | `NONE`
     pub program: Option<String>,
     /// `ACTIVE` | `CANCELLED` | 비우면 전체
@@ -246,7 +246,7 @@ pub struct FeeDiff {
     pub enrollment_id: i64,
     pub student_id: i64,
     pub grade: i64,
-    pub class_no: i64,
+    pub class_no: String,
     pub student_no: i64,
     pub name: String,
     pub department_id: i64,
@@ -433,7 +433,7 @@ pub struct BudgetView {
 pub struct SelfPayRow {
     pub student_id: i64,
     pub grade: i64,
-    pub class_no: i64,
+    pub class_no: String,
     pub student_no: i64,
     pub name: String,
     pub department_id: i64,
@@ -457,7 +457,7 @@ pub struct SelfPayRow {
 pub struct ProgramRow {
     pub student_id: i64,
     pub grade: i64,
-    pub class_no: i64,
+    pub class_no: String,
     pub student_no: i64,
     pub name: String,
     /// 지원받은 금액 (항목별)
@@ -498,7 +498,7 @@ pub struct Grant {
     pub id: i64,
     pub student_id: i64,
     pub grade: i64,
-    pub class_no: i64,
+    pub class_no: String,
     pub student_no: i64,
     pub name: String,
     pub program: String,

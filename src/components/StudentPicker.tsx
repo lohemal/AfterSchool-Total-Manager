@@ -12,6 +12,7 @@ import { useMemo, useState } from 'react'
 import type { Student } from '@/ipc/types'
 import { api } from '@/ipc/api'
 import { useApp } from '@/lib/useApp'
+import { compareClassNo } from '@/lib/format'
 
 import { Field, Input, Select } from './ui'
 
@@ -40,16 +41,14 @@ export function StudentPicker({
   )
   const classes = useMemo(() => {
     if (!grade) return []
-    return [...new Set(rows.filter((s) => s.grade === Number(grade)).map((s) => s.classNo))].sort(
-      (a, b) => a - b,
-    )
+    return [...new Set(rows.filter((s) => s.grade === Number(grade)).map((s) => s.classNo))].sort(compareClassNo)
   }, [rows, grade])
 
   const candidates = useMemo(() => {
     if (!grade || !classNo) return []
     const key = name.trim()
     return rows
-      .filter((s) => s.grade === Number(grade) && s.classNo === Number(classNo))
+      .filter((s) => s.grade === Number(grade) && s.classNo === classNo)
       .filter((s) => !key || s.name.includes(key))
       .sort((a, b) => a.studentNo - b.studentNo)
   }, [rows, grade, classNo, name])

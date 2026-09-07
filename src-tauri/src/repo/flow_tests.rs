@@ -15,10 +15,10 @@ fn ws(name: &str, start: &str, end: &str) -> WorkspaceInput {
     }
 }
 
-fn student(grade: i64, class_no: i64, no: i64, name: &str) -> StudentInput {
+fn student(grade: i64, class_no: impl ToString, no: i64, name: &str) -> StudentInput {
     StudentInput {
         grade,
-        class_no,
+        class_no: class_no.to_string(),
         student_no: no,
         name: name.to_string(),
         note: None,
@@ -183,8 +183,8 @@ fn 학생_업로드는_기존_학생을_지우지_않고_갱신한다() {
     let year = db.write(|c| repo::year::create_year(c, 2026, "2026학년도")).unwrap();
 
     let rows = vec![
-        StudentRow { grade: 3, class_no: 1, student_no: 1, name: "김하나".into(), note: String::new() },
-        StudentRow { grade: 3, class_no: 1, student_no: 2, name: "이두리".into(), note: String::new() },
+        StudentRow { grade: 3, class_no: "1".into(), student_no: 1, name: "김하나".into(), note: String::new() },
+        StudentRow { grade: 3, class_no: "1".into(), student_no: 2, name: "이두리".into(), note: String::new() },
     ];
     let (added, updated) = db.write(|c| repo::student::upsert_bulk(c, year, &rows)).unwrap();
     assert_eq!((added, updated), (2, 0));
@@ -192,7 +192,7 @@ fn 학생_업로드는_기존_학생을_지우지_않고_갱신한다() {
     // 같은 학년·반·번호는 이름만 갱신된다 (개명·오타 수정)
     let rows = vec![StudentRow {
         grade: 3,
-        class_no: 1,
+        class_no: "1".into(),
         student_no: 2,
         name: "이두리(수정)".into(),
         note: String::new(),

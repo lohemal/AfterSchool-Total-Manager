@@ -14,7 +14,7 @@ import { useMemo, useState } from 'react'
 import { Button, Card, Empty, Field, Input, Notice, Select } from '@/components/ui'
 import { api } from '@/ipc/api'
 import type { Student } from '@/ipc/types'
-import { supportLabel, won } from '@/lib/format'
+import { compareClassNo, supportLabel, won } from '@/lib/format'
 import { useApp } from '@/lib/useApp'
 
 export function StudentDetailPage() {
@@ -39,7 +39,7 @@ export function StudentDetailPage() {
   )
   const classes = useMemo(() => {
     const list = rows.filter((s) => !grade || s.grade === Number(grade))
-    return [...new Set(list.map((s) => s.classNo))].sort((a, b) => a - b)
+    return [...new Set(list.map((s) => s.classNo))].sort(compareClassNo)
   }, [rows, grade])
 
   const hasCondition =
@@ -50,7 +50,7 @@ export function StudentDetailPage() {
     if (!hasCondition) return []
     return rows.filter((s) => {
       if (grade && s.grade !== Number(grade)) return false
-      if (classNo && s.classNo !== Number(classNo)) return false
+      if (classNo && s.classNo !== classNo) return false
       if (studentNo.trim() && s.studentNo !== Number(studentNo.replace(/[^0-9]/g, ''))) return false
       if (name.trim() && !s.name.includes(name.trim())) return false
       return true

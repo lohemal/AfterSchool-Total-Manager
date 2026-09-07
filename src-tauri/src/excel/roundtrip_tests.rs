@@ -204,7 +204,7 @@ fn enroll_fixture() -> (Db, i64, i64) {
                 year,
                 &StudentInput {
                     grade: g,
-                    class_no: cl,
+                    class_no: cl.to_string(),
                     student_no: no,
                     name: name.into(),
                     note: None,
@@ -296,7 +296,7 @@ fn 이미_수강_중인_학생은_오류로_걸러진다() {
     let (db, year, ws) = enroll_fixture();
     let items = db.read(|c| repo::cost_items(c)).unwrap();
     let student = db
-        .read(|c| repo::student::find_by_key(c, year, 3, 1, 1))
+        .read(|c| repo::student::find_by_key(c, year, 3, "1", 1))
         .unwrap()
         .unwrap()
         .0;

@@ -83,7 +83,7 @@ impl P {
                     self.year,
                     &StudentInput {
                         grade,
-                        class_no: 1,
+                        class_no: "1".into(),
                         student_no: no,
                         name: name.into(),
                         note: None,

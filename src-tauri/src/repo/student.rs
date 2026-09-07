@@ -4,6 +4,7 @@
 
 use rusqlite::{params, Connection, OptionalExtension, ToSql};
 
+use crate::domain::class_no;
 use crate::error::{AppError, AppResult};
 use crate::model::{Student, StudentFilter, StudentInput};
 use crate::repo::required_text;
@@ -12,7 +13,7 @@ use crate::repo::required_text;
 #[derive(Debug, Clone)]
 pub struct StudentRow {
     pub grade: i64,
-    pub class_no: i64,
+    pub class_no: String,
     pub student_no: i64,
     pub name: String,
     pub note: String,
@@ -56,7 +57,7 @@ pub fn list(conn: &Connection, year_id: i64, f: &StudentFilter) -> AppResult<Vec
         args.push(Box::new(g));
         sql.push_str(&format!(" AND s.grade = ?{}", args.len()));
     }
-    if let Some(c) = f.class_no {
+    if let Some(c) = f.class_no.as_ref().map(|s| class_no::normalize(s)).filter(|s| !s.is_empty()) {
         args.push(Box::new(c));
         sql.push_str(&format!(" AND s.class_no = ?{}", args.len()));
     }
@@ -73,7 +74,9 @@ pub fn list(conn: &Connection, year_id: i64, f: &StudentFilter) -> AppResult<Vec
         let i = args.len();
         sql.push_str(&format!(" AND (s.name LIKE ?{i} OR s.note LIKE ?{i})"));
     }
-    sql.push_str(" ORDER BY s.grade, s.class_no, s.student_no");
+    // class_sort 는 숫자 반을 자연 정렬하기 위한 값이다 (domain::class_no 참고).
+    // class_no 까지 넣어 차례가 늘 하나로 정해지게 한다.
+    sql.push_str(" ORDER BY s.grade, s.class_sort, s.class_no, s.student_no");
 
     let mut st = conn.prepare(&sql)?;
     let refs: Vec<&dyn ToSql> = args.iter().map(|b| b.as_ref()).collect();
@@ -116,28 +119,28 @@ pub fn list(conn: &Connection, year_id: i64, f: &StudentFilter) -> AppResult<Vec
     Ok(filtered)
 }
 
-fn check(input: &StudentInput) -> AppResult<String> {
+/// 다듬은 `(반, 이름)`을 돌려준다. 반은 앞뒤 공백을 뗀 값이라 저장할 때 이걸 쓴다.
+fn check(input: &StudentInput) -> AppResult<(String, String)> {
     if !(1..=9).contains(&input.grade) {
         return Err(AppError::invalid("학년은 1~9 사이여야 합니다."));
     }
-    if !(1..=99).contains(&input.class_no) {
-        return Err(AppError::invalid("반은 1~99 사이여야 합니다."));
-    }
+    let class_no = class_no::check(&input.class_no).map_err(AppError::invalid)?;
     if !(1..=99).contains(&input.student_no) {
         return Err(AppError::invalid("번호는 1~99 사이여야 합니다."));
     }
-    required_text("이름", &input.name)
+    let name = required_text("이름", &input.name)?;
+    Ok((class_no, name))
 }
 
 pub fn create(conn: &Connection, year_id: i64, input: &StudentInput) -> AppResult<i64> {
-    let name = check(input)?;
+    let (class_no, name) = check(input)?;
     conn.execute(
         "INSERT INTO student (year_id, grade, class_no, student_no, name, note)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
         params![
             year_id,
             input.grade,
-            input.class_no,
+            class_no,
             input.student_no,
             name,
             input.note.clone().unwrap_or_default()
@@ -147,14 +150,14 @@ pub fn create(conn: &Connection, year_id: i64, input: &StudentInput) -> AppResul
 }
 
 pub fn update(conn: &Connection, id: i64, input: &StudentInput) -> AppResult<()> {
-    let name = check(input)?;
+    let (class_no, name) = check(input)?;
     let n = conn.execute(
         "UPDATE student SET grade = ?2, class_no = ?3, student_no = ?4, name = ?5, note = ?6
           WHERE id = ?1",
         params![
             id,
             input.grade,
-            input.class_no,
+            class_no,
             input.student_no,
             name,
             input.note.clone().unwrap_or_default()
@@ -218,7 +221,7 @@ pub fn find_by_key(
     conn: &Connection,
     year_id: i64,
     grade: i64,
-    class_no: i64,
+    class_no: &str,
     student_no: i64,
 ) -> AppResult<Option<(i64, String)>> {
     Ok(conn

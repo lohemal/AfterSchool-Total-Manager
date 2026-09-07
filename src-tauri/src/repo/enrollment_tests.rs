@@ -54,7 +54,7 @@ fn setup() -> Fixture {
 }
 
 impl Fixture {
-    fn student(&self, grade: i64, class_no: i64, no: i64, name: &str) -> i64 {
+    fn student(&self, grade: i64, class_no: impl ToString, no: i64, name: &str) -> i64 {
         self.db
             .write(|c| {
                 repo::student::create(
@@ -62,7 +62,7 @@ impl Fixture {
                     self.year,
                     &StudentInput {
                         grade,
-                        class_no,
+                        class_no: class_no.to_string(),
                         student_no: no,
                         name: name.into(),
                         note: None,

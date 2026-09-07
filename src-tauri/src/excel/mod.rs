@@ -18,7 +18,7 @@ use std::sync::Mutex;
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 
-use crate::domain::{grade_matches, parse_grades};
+use crate::domain::{class_no, grade_matches, parse_grades};
 use crate::error::{AppError, AppResult};
 use crate::model::{CostItem, Fee};
 use crate::repo;
@@ -225,29 +225,38 @@ pub fn preview_students(path: &Path) -> AppResult<(ImportPreview, Staged)> {
     let c_note = sheet.col("비고");
 
     let mut col = Collector::new();
-    let mut seen: HashSet<(i64, i64, i64)> = HashSet::new();
+    // 반은 문자다. '1'과 '가'가 모두 같은 자리에 들어온다.
+    let mut seen: HashSet<(i64, String, i64)> = HashSet::new();
     let mut rows = Vec::new();
 
     for (line, cells) in &sheet.rows {
         col.total += 1;
         let grade = read::parse_int(sheet.cell(cells, Some(c_grade)));
-        let class_no = read::parse_int(sheet.cell(cells, Some(c_class)));
+        // read::text 를 거친 값이라 엑셀이 숫자로 넣은 1도 "1"로 들어온다.
+        let class_no = class_no::normalize(sheet.cell(cells, Some(c_class)));
         let student_no = read::parse_int(sheet.cell(cells, Some(c_no)));
         let name = sheet.cell(cells, Some(c_name)).trim().to_string();
 
-        let (Some(grade), Some(class_no), Some(student_no)) = (grade, class_no, student_no) else {
-            col.error(*line, cells, "학년·반·번호는 숫자여야 합니다.");
+        let (Some(grade), Some(student_no)) = (grade, student_no) else {
+            col.error(*line, cells, "학년과 번호는 숫자여야 합니다.");
             continue;
         };
-        if !(1..=9).contains(&grade) || !(1..=99).contains(&class_no) || !(1..=99).contains(&student_no) {
-            col.error(*line, cells, "학년(1~9)·반(1~99)·번호(1~99) 범위를 벗어났습니다.");
+        let class_no = match class_no::check(&class_no) {
+            Ok(v) => v,
+            Err(msg) => {
+                col.error(*line, cells, &msg);
+                continue;
+            }
+        };
+        if !(1..=9).contains(&grade) || !(1..=99).contains(&student_no) {
+            col.error(*line, cells, "학년(1~9)·번호(1~99) 범위를 벗어났습니다.");
             continue;
         }
         if name.is_empty() {
             col.error(*line, cells, "이름이 비어 있습니다.");
             continue;
         }
-        if !seen.insert((grade, class_no, student_no)) {
+        if !seen.insert((grade, class_no.clone(), student_no)) {
             col.error(*line, cells, "같은 학년·반·번호가 파일 안에 두 번 있습니다.");
             continue;
         }
@@ -288,14 +297,18 @@ pub fn preview_eligibility(
     for (line, cells) in &sheet.rows {
         col.total += 1;
         let grade = read::parse_int(sheet.cell(cells, Some(c_grade)));
-        let class_no = read::parse_int(sheet.cell(cells, Some(c_class)));
+        let class_no = class_no::normalize(sheet.cell(cells, Some(c_class)));
         let student_no = read::parse_int(sheet.cell(cells, Some(c_no)));
-        let (Some(grade), Some(class_no), Some(student_no)) = (grade, class_no, student_no) else {
-            col.error(*line, cells, "학년·반·번호는 숫자여야 합니다.");
+        let (Some(grade), Some(student_no)) = (grade, student_no) else {
+            col.error(*line, cells, "학년과 번호는 숫자여야 합니다.");
             continue;
         };
+        if class_no.is_empty() {
+            col.error(*line, cells, "반이 비어 있습니다.");
+            continue;
+        }
 
-        let found = repo::student::find_by_key(conn, year_id, grade, class_no, student_no)?;
+        let found = repo::student::find_by_key(conn, year_id, grade, &class_no, student_no)?;
         let Some((student_id, real_name)) = found else {
             col.error(
                 *line,
@@ -506,15 +519,19 @@ pub fn preview_enrollments(
         };
 
         let grade = read::parse_int(sheet.cell(cells, Some(c_grade)));
-        let class_no = read::parse_int(sheet.cell(cells, Some(c_class)));
+        let class_no = class_no::normalize(sheet.cell(cells, Some(c_class)));
         let student_no = read::parse_int(sheet.cell(cells, Some(c_no)));
-        let (Some(grade), Some(class_no), Some(student_no)) = (grade, class_no, student_no) else {
-            col.error(*line, cells, "학년·반·번호는 숫자여야 합니다.");
+        let (Some(grade), Some(student_no)) = (grade, student_no) else {
+            col.error(*line, cells, "학년과 번호는 숫자여야 합니다.");
             continue;
         };
+        if class_no.is_empty() {
+            col.error(*line, cells, "반이 비어 있습니다.");
+            continue;
+        }
 
         let Some((student_id, real_name)) =
-            repo::student::find_by_key(conn, year_id, grade, class_no, student_no)?
+            repo::student::find_by_key(conn, year_id, grade, &class_no, student_no)?
         else {
             col.error(
                 *line,
@@ -838,3 +855,7 @@ pub fn target_grade_text(target_grades: &str) -> String {
 
 #[cfg(test)]
 mod roundtrip_tests;
+
+#[cfg(test)]
+#[path = "class_no_tests.rs"]
+mod class_no_tests;

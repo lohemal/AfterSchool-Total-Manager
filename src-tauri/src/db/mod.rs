@@ -103,3 +103,7 @@ fn setup_conn(conn: &Connection) -> AppResult<()> {
     conn.busy_timeout(std::time::Duration::from_secs(5))?;
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "class_no_migration_tests.rs"]
+mod class_no_migration_tests;

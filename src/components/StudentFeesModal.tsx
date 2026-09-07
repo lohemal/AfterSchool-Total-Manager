@@ -21,7 +21,7 @@ import { Button, Empty, Field, Input, MoneyInput, Notice } from './ui'
 interface Draft {
   enrollmentId: number
   grade: number
-  classNo: number
+  classNo: string
   studentNo: number
   name: string
   hasOverride: boolean

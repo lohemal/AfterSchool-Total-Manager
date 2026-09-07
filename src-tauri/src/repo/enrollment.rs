@@ -12,7 +12,7 @@ use std::collections::HashMap;
 
 use rusqlite::{params, Connection, OptionalExtension, ToSql};
 
-use crate::domain::{eligibility_active, grade_matches, parse_grades};
+use crate::domain::{class_no, eligibility_active, grade_matches, parse_grades};
 use crate::error::{AppError, AppResult};
 use crate::model::{
     ApplyResult, CostItem, Enrollment, EnrollmentFilter, EnrollmentInput, Fee, FeeDiff, FeePick,
@@ -62,7 +62,7 @@ pub fn dept_label(name: &str, class_name: &str) -> String {
     }
 }
 
-pub fn student_label(grade: i64, class_no: i64, student_no: i64, name: &str) -> String {
+pub fn student_label(grade: i64, class_no: &str, student_no: i64, name: &str) -> String {
     format!("{grade}학년 {class_no}반 {student_no}번 {name}")
 }
 
@@ -90,7 +90,7 @@ struct Raw {
     student_id: i64,
     department_id: i64,
     grade: i64,
-    class_no: i64,
+    class_no: String,
     student_no: i64,
     name: String,
     dept_name: String,
@@ -109,7 +109,7 @@ FROM enrollment e
 JOIN student s    ON s.id = e.student_id
 JOIN department d ON d.id = e.department_id";
 
-const RAW_ORDER: &str = " ORDER BY d.name, d.class_name, s.grade, s.class_no, s.student_no";
+const RAW_ORDER: &str = " ORDER BY d.name, d.class_name, s.grade, s.class_sort, s.class_no, s.student_no";
 
 fn map_raw(r: &rusqlite::Row) -> rusqlite::Result<Raw> {
     Ok(Raw {
@@ -332,7 +332,7 @@ pub fn list(
         args.push(Box::new(g));
         sql.push_str(&format!(" AND s.grade = ?{}", args.len()));
     }
-    if let Some(c) = f.class_no {
+    if let Some(c) = f.class_no.as_ref().map(|s| class_no::normalize(s)).filter(|s| !s.is_empty()) {
         args.push(Box::new(c));
         sql.push_str(&format!(" AND s.class_no = ?{}", args.len()));
     }
@@ -469,7 +469,7 @@ struct Ctx {
 
 fn ctx_of(conn: &Connection, workspace_id: i64, student_id: i64, department_id: i64) -> AppResult<Ctx> {
     let year_id = year_of_workspace(conn, workspace_id)?;
-    let (grade, class_no, student_no, name): (i64, i64, i64, String) = conn
+    let (grade, class_no, student_no, name): (i64, String, i64, String) = conn
         .query_row(
             "SELECT grade, class_no, student_no, name FROM student WHERE id = ?1",
             params![student_id],
@@ -487,7 +487,7 @@ fn ctx_of(conn: &Connection, workspace_id: i64, student_id: i64, department_id: 
         .ok_or_else(|| AppError::not_found("부서를 찾지 못했습니다."))?;
     Ok(Ctx {
         year_id,
-        student_label: student_label(grade, class_no, student_no, &name),
+        student_label: student_label(grade, &class_no, student_no, &name),
         dept_label: dept_label(&dname, &dclass),
         student_id,
         department_id,
@@ -627,7 +627,7 @@ pub fn update_fees(
         Some(before.department_id),
         &format!(
             "{} / {}",
-            student_label(before.grade, before.class_no, before.student_no, &before.name),
+            student_label(before.grade, &before.class_no, before.student_no, &before.name),
             before.dept_label
         ),
         &before_text,
@@ -674,7 +674,7 @@ pub fn cancel(conn: &Connection, id: i64, reason: &str, items: &[CostItem]) -> A
         Some(row.department_id),
         &format!(
             "{} / {}",
-            student_label(row.grade, row.class_no, row.student_no, &row.name),
+            student_label(row.grade, &row.class_no, row.student_no, &row.name),
             row.dept_label
         ),
         "수강중",
@@ -717,7 +717,7 @@ pub fn restore(conn: &Connection, id: i64, reason: &str, items: &[CostItem]) -> 
         Some(row.department_id),
         &format!(
             "{} / {}",
-            student_label(row.grade, row.class_no, row.student_no, &row.name),
+            student_label(row.grade, &row.class_no, row.student_no, &row.name),
             row.dept_label
         ),
         "취소",
@@ -778,7 +778,7 @@ pub fn fee_diff(
             AND e.status = 'ACTIVE'
             AND (?2 IS NULL OR e.department_id = ?2)
             AND c.amount <> COALESCE(f.amount, 0)
-          ORDER BY d.name, d.class_name, s.grade, s.class_no, s.student_no",
+          ORDER BY d.name, d.class_name, s.grade, s.class_sort, s.class_no, s.student_no",
     )?;
 
     let rows = st
@@ -809,14 +809,20 @@ pub fn fee_diff(
         .map(|(i, it)| (it.code.as_str(), i))
         .collect();
     let mut rows = rows;
-    rows.sort_by_key(|r| {
-        (
-            r.dept_label.clone(),
-            r.grade,
-            r.class_no,
-            r.student_no,
-            order.get(r.item_code.as_str()).copied().unwrap_or(usize::MAX),
-        )
+    rows.sort_by(|a, b| {
+        a.dept_label
+            .cmp(&b.dept_label)
+            .then(a.grade.cmp(&b.grade))
+            // 숫자 반이 1, 10, 2 로 놓이지 않도록 반 정렬 규칙을 쓴다.
+            .then(class_no::cmp(&a.class_no, &b.class_no))
+            .then(a.student_no.cmp(&b.student_no))
+            .then(
+                order
+                    .get(a.item_code.as_str())
+                    .copied()
+                    .unwrap_or(usize::MAX)
+                    .cmp(&order.get(b.item_code.as_str()).copied().unwrap_or(usize::MAX)),
+            )
     });
     Ok(rows)
 }
@@ -883,7 +889,7 @@ pub fn apply_fees(
             Some(before.department_id),
             &format!(
                 "{} / {}",
-                student_label(before.grade, before.class_no, before.student_no, &before.name),
+                student_label(before.grade, &before.class_no, before.student_no, &before.name),
                 before.dept_label
             ),
             &fees_text(items, &before.fees),
@@ -909,7 +915,7 @@ pub fn student_detail(
     student_id: i64,
     items: &[CostItem],
 ) -> AppResult<StudentDetail> {
-    let (grade, class_no, student_no, name, note): (i64, i64, i64, String, String) = conn
+    let (grade, class_no, student_no, name, note): (i64, String, i64, String, String) = conn
         .query_row(
             "SELECT grade, class_no, student_no, name, note FROM student WHERE id = ?1",
             params![student_id],

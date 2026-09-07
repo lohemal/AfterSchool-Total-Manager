@@ -38,7 +38,7 @@ fn student(db: &Db, year: i64, no: i64, name: &str) {
             year,
             &StudentInput {
                 grade: 3,
-                class_no: 1,
+                class_no: "1".into(),
                 student_no: no,
                 name: name.into(),
                 note: None,

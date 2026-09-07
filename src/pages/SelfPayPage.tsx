@@ -19,7 +19,7 @@ import { StudentAllocModal } from '@/components/StudentAllocModal'
 import { Button, Card, Empty, Field, Notice, Search, Select } from '@/components/ui'
 import { api } from '@/ipc/api'
 import type { SelfPayRow } from '@/ipc/types'
-import { won } from '@/lib/format'
+import { compareClassNo, won } from '@/lib/format'
 import { useApp } from '@/lib/useApp'
 
 import { SettleGuard } from './SettlementPage'
@@ -61,7 +61,7 @@ export function SelfPayPage() {
   )
   const classes = useMemo(() => {
     const rows = all.filter((r) => !grade || r.grade === Number(grade))
-    return [...new Set(rows.map((r) => r.classNo))].sort((a, b) => a - b)
+    return [...new Set(rows.map((r) => r.classNo))].sort(compareClassNo)
   }, [all, grade])
   const depts = useMemo(() => {
     const map = new Map<number, string>()
@@ -72,7 +72,7 @@ export function SelfPayPage() {
   const rows = useMemo(() => {
     let out = all
     if (grade) out = out.filter((r) => r.grade === Number(grade))
-    if (classNo) out = out.filter((r) => r.classNo === Number(classNo))
+    if (classNo) out = out.filter((r) => r.classNo === classNo)
     if (deptId) out = out.filter((r) => r.departmentId === Number(deptId))
     if (origin === 'PLAIN') out = out.filter((r) => r.originPlain > 0)
     if (origin === 'VOUCHER') out = out.filter((r) => r.originVoucher > 0)
@@ -87,7 +87,7 @@ export function SelfPayPage() {
 
   const columns: Column<SelfPayRow>[] = [
     { key: 'grade', head: '학년', width: 54, sort: cmp.num((r) => r.grade), render: (r) => r.grade },
-    { key: 'classNo', head: '반', width: 54, sort: cmp.num((r) => r.classNo), render: (r) => r.classNo },
+    { key: 'classNo', head: '반', width: 54, sort: cmp.classNo((r) => r.classNo), render: (r) => r.classNo },
     { key: 'studentNo', head: '번호', width: 54, sort: cmp.num((r) => r.studentNo), render: (r) => r.studentNo },
     { key: 'name', head: '이름', width: 96, sort: cmp.text((r) => r.name), render: (r) => r.name },
     {

@@ -54,7 +54,7 @@ pub fn list(conn: &Connection, year_id: i64, program: &str, query: Option<&str>)
            JOIN student s ON s.id = e.student_id
           WHERE e.year_id = ?1 AND e.program = ?2
             AND (?3 IS NULL OR s.name LIKE ?3 OR e.note LIKE ?3)
-          ORDER BY s.grade, s.class_no, s.student_no",
+          ORDER BY s.grade, s.class_sort, s.class_no, s.student_no",
     )?;
     let rows = st
         .query_map(params![year_id, program, like], |r| {

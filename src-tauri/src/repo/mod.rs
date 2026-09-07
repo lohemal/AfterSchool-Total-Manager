@@ -66,3 +66,6 @@ mod settle_tests;
 
 #[cfg(test)]
 mod proposal_tests;
+
+#[cfg(test)]
+mod class_no_tests;

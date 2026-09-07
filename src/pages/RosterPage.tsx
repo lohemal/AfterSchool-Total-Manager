@@ -19,7 +19,7 @@ import { useToast } from '@/components/Toast'
 import { Button, Card, Empty, Field, Input, Notice, Search, Select } from '@/components/ui'
 import { api, errorMessage } from '@/ipc/api'
 import type { Enrollment, EnrollmentFilter } from '@/ipc/types'
-import { supportLabel, won } from '@/lib/format'
+import { compareClassNo, supportLabel, won } from '@/lib/format'
 import { useApp } from '@/lib/useApp'
 
 export function RosterPage() {
@@ -46,7 +46,7 @@ export function RosterPage() {
     () => ({
       departmentId: departmentId ? Number(departmentId) : null,
       grade: grade ? Number(grade) : null,
-      classNo: classNo ? Number(classNo) : null,
+      classNo: classNo || null,
       program: program || null,
       status: (status || null) as EnrollmentFilter['status'],
       query: query.trim() || null,
@@ -78,7 +78,7 @@ export function RosterPage() {
   )
   const classes = useMemo(() => {
     const rows = (all.data ?? []).filter((e) => !grade || e.grade === Number(grade))
-    return [...new Set(rows.map((e) => e.classNo))].sort((a, b) => a - b)
+    return [...new Set(rows.map((e) => e.classNo))].sort(compareClassNo)
   }, [all.data, grade])
 
   const one = selected.length === 1 ? list.data?.find((e) => e.id === selected[0]) : undefined
@@ -130,7 +130,7 @@ export function RosterPage() {
       render: (e) => e.deptLabel,
     },
     { key: 'grade', head: '학년', width: 54, sort: cmp.num((e) => e.grade), render: (e) => e.grade },
-    { key: 'classNo', head: '반', width: 54, sort: cmp.num((e) => e.classNo), render: (e) => e.classNo },
+    { key: 'classNo', head: '반', width: 54, sort: cmp.classNo((e) => e.classNo), render: (e) => e.classNo },
     { key: 'studentNo', head: '번호', width: 54, sort: cmp.num((e) => e.studentNo), render: (e) => e.studentNo },
     { key: 'name', head: '이름', width: 96, sort: cmp.text((e) => e.name), render: (e) => e.name },
     {

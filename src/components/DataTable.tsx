@@ -7,6 +7,7 @@
  */
 
 import { useMemo, useState, type ReactNode } from 'react'
+import { compareClassNo } from '@/lib/format'
 
 export interface Column<T> {
   key: string
@@ -169,4 +170,9 @@ export function DataTable<T>({
 export const cmp = {
   num: <T,>(pick: (r: T) => number) => (a: T, b: T) => pick(a) - pick(b),
   text: <T,>(pick: (r: T) => string) => (a: T, b: T) => pick(a).localeCompare(pick(b), 'ko'),
+  /**
+   * 반 전용. 숫자 반은 `1, 2, 3, 10` 으로, 문자 반은 `가 나 다` 로 놓는다.
+   * 그냥 `text` 를 쓰면 `1, 10, 2` 가 되어 숫자 반 학교의 쓰임새가 나빠진다.
+   */
+  classNo: <T,>(pick: (r: T) => string) => (a: T, b: T) => compareClassNo(pick(a), pick(b)),
 }

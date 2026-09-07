@@ -65,7 +65,7 @@ impl S {
             .unwrap()
     }
 
-    fn student(&self, grade: i64, class_no: i64, no: i64, name: &str) -> i64 {
+    fn student(&self, grade: i64, class_no: impl ToString, no: i64, name: &str) -> i64 {
         self.db
             .write(|c| {
                 repo::student::create(
@@ -73,7 +73,7 @@ impl S {
                     self.year,
                     &StudentInput {
                         grade,
-                        class_no,
+                        class_no: class_no.to_string(),
                         student_no: no,
                         name: name.into(),
                         note: None,
@@ -1076,4 +1076,75 @@ fn 같은_자료를_두_번_정산하면_같은_결과가_나온다() {
     let second = take(&s);
     assert_eq!(first, second, "같은 자료면 언제나 같은 정산 결과");
     assert!(!first.is_empty());
+}
+
+// ─────────────────────────────────────────────── 한글 반 (최종 QA)
+
+#[test]
+fn 한글_반_학생도_똑같이_정산된다() {
+    // 반이 '가'든 '1'이든 금액 계산은 달라질 까닭이 없다. 그걸 못 박아 둔다.
+    let s = S::new();
+    let ws = s.ws("4월", "2026-04-01", "2026-04-30");
+    let hana = s.student(3, "가", 1, "김하나");
+    let d = s.dept(ws, "로봇과학", vec![fee(강사료, 40_000), fee(교재비, 30_000)]);
+    s.enroll(ws, hana, d);
+    학기제(&s, false);
+    s.elig(hana, Program::Voucher);
+
+    s.generate(ws);
+    assert_eq!(s.fund(ws, "VOUCHER"), 70_000);
+    assert_eq!(s.fund(ws, "SELF_PAY"), 0);
+    assert!(s.summary(ws).balanced);
+}
+
+#[test]
+fn 한글_반_학생이_이용권_결과_화면에_나온다() {
+    let s = S::new();
+    let ws = s.ws("4월", "2026-04-01", "2026-04-30");
+    let hana = s.student(3, "해", 1, "김하나");
+    let d = s.dept(ws, "로봇과학", vec![fee(강사료, 40_000)]);
+    s.enroll(ws, hana, d);
+    학기제(&s, false);
+    s.elig(hana, Program::Voucher);
+    s.generate(ws);
+
+    let rows = s
+        .db
+        .read(|c| repo::settle::program_rows(c, ws, Program::Voucher, &s.items))
+        .unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].class_no, "해");
+}
+
+#[test]
+fn 수익자_화면에도_한글_반이_그대로_나온다() {
+    let s = S::new();
+    let ws = s.ws("4월", "2026-04-01", "2026-04-30");
+    let hana = s.student(3, "나", 1, "김하나");
+    let d = s.dept(ws, "로봇과학", vec![fee(강사료, 40_000)]);
+    s.enroll(ws, hana, d);
+    학기제(&s, false);
+    s.generate(ws);
+
+    let rows = s.db.read(|c| repo::settle::self_pay_rows(c, ws, &s.items)).unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].class_no, "나");
+}
+
+#[test]
+fn 정산_결과도_반_차례대로_나온다() {
+    // 숫자 반이 1, 10, 2 로 놓이면 품의·수익자 자료의 차례가 뒤죽박죽이 된다.
+    let s = S::new();
+    let ws = s.ws("4월", "2026-04-01", "2026-04-30");
+    let d = s.dept(ws, "로봇과학", vec![fee(강사료, 10_000)]);
+    for (i, cls) in ["나", "10", "가", "2", "1"].iter().enumerate() {
+        let id = s.student(3, cls, i as i64 + 1, "아무개");
+        s.enroll(ws, id, d);
+    }
+    학기제(&s, false);
+    s.generate(ws);
+
+    let rows = s.db.read(|c| repo::settle::self_pay_rows(c, ws, &s.items)).unwrap();
+    let 반: Vec<&str> = rows.iter().map(|r| r.class_no.as_str()).collect();
+    assert_eq!(반, vec!["1", "2", "10", "가", "나"]);
 }

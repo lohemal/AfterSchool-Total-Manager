@@ -5,17 +5,47 @@ export function won(n: number | null | undefined): string {
   return n.toLocaleString('ko-KR')
 }
 
-export function classLabel(grade: number, classNo: number): string {
+export function classLabel(grade: number, classNo: string): string {
   return `${grade}-${classNo}`
 }
 
 export function studentLabel(s: {
   grade: number
-  classNo: number
+  classNo: string
   studentNo: number
   name: string
 }): string {
   return `${s.grade}학년 ${s.classNo}반 ${s.studentNo}번 ${s.name}`
+}
+
+/**
+ * 반 정렬용 열쇠.
+ *
+ * 학교마다 반 이름이 다르다. `1 2 3`을 쓰는 곳도 있고 `가 나 다`, `해 달 별`을
+ * 쓰는 곳도 있어서 반은 문자다. 그런데 그냥 사전순으로 놓으면 `1, 10, 2, 3`이
+ * 되어 숫자 반을 쓰는 학교의 쓰임새가 나빠진다.
+ *
+ * ```
+ * 숫자 반  '1'  → "0000001"     '10' → "0000010"
+ * 문자 반  '가' → "1가"
+ * ```
+ *
+ * 앞자리 `0`/`1` 덕분에 숫자 반이 늘 문자 반보다 앞에 온다.
+ *
+ * **같은 규칙이 세 곳에 있다** — 여기, Rust의 `domain::class_no`,
+ * 그리고 DB의 `student.class_sort` 열. 하나만 고치면 화면과 엑셀의 차례가
+ * 달라지므로 함께 고쳐야 한다.
+ */
+export function classSortKey(classNo: string): string {
+  return /^[0-9]+$/.test(classNo) ? `0${classNo.padStart(6, '0')}` : `1${classNo}`
+}
+
+/** 반 두 개의 차례를 견준다. `Array.prototype.sort`에 그대로 넘길 수 있다. */
+export function compareClassNo(a: string, b: string): number {
+  const ka = classSortKey(a)
+  const kb = classSortKey(b)
+  // 열쇠가 같은 경우('1'과 '01')까지 생각해 원래 값으로 한 번 더 가른다.
+  return ka < kb ? -1 : ka > kb ? 1 : a < b ? -1 : a > b ? 1 : 0
 }
 
 export function dateRange(from: string, to: string): string {

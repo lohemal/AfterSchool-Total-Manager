@@ -70,7 +70,7 @@ export function EligibilityPage() {
 
   const columns: Column<Eligibility>[] = [
     { key: 'grade', head: '학년', width: 60, sort: cmp.num((r) => r.grade), render: (r) => r.grade },
-    { key: 'classNo', head: '반', width: 60, sort: cmp.num((r) => r.classNo), render: (r) => r.classNo },
+    { key: 'classNo', head: '반', width: 60, sort: cmp.classNo((r) => r.classNo), render: (r) => r.classNo },
     { key: 'studentNo', head: '번호', width: 60, sort: cmp.num((r) => r.studentNo), render: (r) => r.studentNo },
     { key: 'name', head: '이름', width: 110, sort: cmp.text((r) => r.name), render: (r) => r.name },
     {

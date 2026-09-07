@@ -21,6 +21,14 @@ struct Migration {
     version: i32,
     name: &'static str,
     sql: &'static str,
+    /// 표를 다시 만드는 마이그레이션인가.
+    ///
+    /// SQLite 는 컬럼 타입을 못 바꾸므로 `새 표 → 옮기기 → DROP → 이름 바꾸기`로
+    /// 갈아 끼워야 한다. 그런데 **외래키를 켠 채 `DROP TABLE` 하면 자식 행이
+    /// 함께 지워진다** — student 를 지우면 enrollment 까지 날아간다.
+    /// `PRAGMA foreign_keys` 는 트랜잭션 안에서 듣지 않으므로 트랜잭션 바깥에서
+    /// 껐다가, 끝난 뒤 `foreign_key_check` 로 확인하고 다시 켠다.
+    fk_off: bool,
 }
 
 const MIGRATIONS: &[Migration] = &[
@@ -28,16 +36,25 @@ const MIGRATIONS: &[Migration] = &[
         version: 1,
         name: "001_init",
         sql: include_str!("../../migrations/001_init.sql"),
+        fk_off: false,
     },
     Migration {
         version: 2,
         name: "002_change_log_target",
         sql: include_str!("../../migrations/002_change_log_target.sql"),
+        fk_off: false,
     },
     Migration {
         version: 3,
         name: "003_settlement_budget",
         sql: include_str!("../../migrations/003_settlement_budget.sql"),
+        fk_off: false,
+    },
+    Migration {
+        version: 4,
+        name: "004_class_no_text",
+        sql: include_str!("../../migrations/004_class_no_text.sql"),
+        fk_off: true,
     },
 ];
 
@@ -78,24 +95,68 @@ pub fn run_sql_only(conn: &mut Connection) -> AppResult<()> {
 #[cfg(test)]
 pub fn run_up_to(conn: &mut Connection, to: i32) -> AppResult<()> {
     for m in MIGRATIONS.iter().filter(|m| m.version <= to) {
-        let tx = conn.transaction()?;
-        tx.execute_batch(m.sql)?;
-        tx.pragma_update(None, "user_version", m.version)?;
-        tx.commit()?;
+        if m.fk_off {
+            apply_one_without_fk(conn, m)?;
+        } else {
+            apply_one(conn, m)?;
+        }
     }
     Ok(())
 }
 
 fn apply(conn: &mut Connection, from: i32) -> AppResult<()> {
     for m in MIGRATIONS.iter().filter(|m| m.version > from) {
-        let tx = conn.transaction()?;
-        tx.execute_batch(m.sql).map_err(|e| {
-            AppError::new("MIGRATE", "자료 구조를 갱신하지 못했습니다.")
-                .detail(format!("{} :: {e}", m.name))
-        })?;
-        tx.pragma_update(None, "user_version", m.version)?;
-        tx.commit()?;
+        if m.fk_off {
+            apply_one_without_fk(conn, m)?;
+        } else {
+            apply_one(conn, m)?;
+        }
         log::info!("마이그레이션 적용: {}", m.name);
+    }
+    Ok(())
+}
+
+fn apply_one(conn: &mut Connection, m: &Migration) -> AppResult<()> {
+    let tx = conn.transaction()?;
+    tx.execute_batch(m.sql).map_err(|e| {
+        AppError::new("MIGRATE", "자료 구조를 갱신하지 못했습니다.")
+            .detail(format!("{} :: {e}", m.name))
+    })?;
+    if m.fk_off {
+        // 커밋하기 **전에** 본다. 커밋한 뒤에 보면 어긋난 것을 찾아도 되돌릴 수 없다.
+        fk_check(&tx, m.name)?;
+    }
+    tx.pragma_update(None, "user_version", m.version)?;
+    tx.commit()?;
+    Ok(())
+}
+
+/// 표를 갈아 끼우는 마이그레이션. 외래키를 끄고 돌린다.
+///
+/// 외래키를 켠 채 `DROP TABLE student` 를 하면 SQLite 가 먼저 모든 행을 지우고,
+/// `ON DELETE CASCADE` 를 타고 수강·지원대상자 자료까지 함께 사라진다.
+/// 그래서 잠시 끈다. 대신 **커밋 전에 `foreign_key_check` 로 확인**하므로,
+/// 어긋나면 아무것도 적용되지 않고 되돌아간다.
+fn apply_one_without_fk(conn: &mut Connection, m: &Migration) -> AppResult<()> {
+    // PRAGMA 는 트랜잭션 안에서 듣지 않으므로 바깥에서 끈다.
+    conn.pragma_update(None, "foreign_keys", "OFF")?;
+    let result = apply_one(conn, m);
+    // 성공이든 실패든 반드시 되돌린다.
+    let restored = conn.pragma_update(None, "foreign_keys", "ON");
+    result?;
+    restored?;
+    Ok(())
+}
+
+fn fk_check(conn: &Connection, name: &str) -> AppResult<()> {
+    let mut st = conn.prepare("PRAGMA foreign_key_check")?;
+    let broken = st.query_map([], |_| Ok(()))?.count();
+    if broken > 0 {
+        return Err(AppError::new(
+            "MIGRATE",
+            "자료 구조를 갱신한 뒤 연결이 어긋나 갱신을 되돌렸습니다.",
+        )
+        .detail(format!("{name} :: foreign_key_check {broken}건")));
     }
     Ok(())
 }

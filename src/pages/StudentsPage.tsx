@@ -15,7 +15,7 @@ import { useToast } from '@/components/Toast'
 import { Button, Card, Field, Input, Notice, Search, Select } from '@/components/ui'
 import { api, errorMessage } from '@/ipc/api'
 import type { Student, StudentFilter, StudentInput } from '@/ipc/types'
-import { supportLabel } from '@/lib/format'
+import { compareClassNo, supportLabel } from '@/lib/format'
 import { useApp } from '@/lib/useApp'
 
 const EMPTY_FILTER: StudentFilter = {}
@@ -37,7 +37,7 @@ export function StudentsPage() {
     () => ({
       workspaceId: app.workspaceId,
       grade: grade ? Number(grade) : null,
-      classNo: classNo ? Number(classNo) : null,
+      classNo: classNo || null,
       program: program || null,
       query: query.trim() || null,
     }),
@@ -60,7 +60,7 @@ export function StudentsPage() {
   )
   const classes = useMemo(() => {
     const rows = (all.data ?? []).filter((s) => !grade || s.grade === Number(grade))
-    return [...new Set(rows.map((s) => s.classNo))].sort((a, b) => a - b)
+    return [...new Set(rows.map((s) => s.classNo))].sort(compareClassNo)
   }, [all.data, grade])
 
   const remove = useMutation({
@@ -88,7 +88,7 @@ export function StudentsPage() {
 
   const columns: Column<Student>[] = [
     { key: 'grade', head: '학년', width: 60, sort: cmp.num((s) => s.grade), render: (s) => s.grade },
-    { key: 'classNo', head: '반', width: 60, sort: cmp.num((s) => s.classNo), render: (s) => s.classNo },
+    { key: 'classNo', head: '반', width: 60, sort: cmp.classNo((s) => s.classNo), render: (s) => s.classNo },
     { key: 'studentNo', head: '번호', width: 60, sort: cmp.num((s) => s.studentNo), render: (s) => s.studentNo },
     { key: 'name', head: '이름', width: 110, sort: cmp.text((s) => s.name), render: (s) => s.name },
     {
@@ -297,7 +297,7 @@ function StudentModal({
   const toast = useToast()
   const [form, setForm] = useState<StudentInput>({
     grade: value?.grade ?? 1,
-    classNo: value?.classNo ?? 1,
+    classNo: value?.classNo ?? '',
     studentNo: value?.studentNo ?? 1,
     name: value?.name ?? '',
     note: value?.note ?? '',
@@ -338,11 +338,12 @@ function StudentModal({
             onChange={(e) => setForm({ ...form, grade: num(e.target.value) })}
           />
         </Field>
-        <Field label="반">
+        {/* 반은 학교마다 다르다. '1'도 '가'도 '해'도 그대로 쓴다. */}
+        <Field label="반" hint="숫자도 글자도 됩니다 (1, 가, 해)">
           <Input
-            className="input--num"
-            value={form.classNo || ''}
-            onChange={(e) => setForm({ ...form, classNo: num(e.target.value) })}
+            value={form.classNo}
+            maxLength={10}
+            onChange={(e) => setForm({ ...form, classNo: e.target.value })}
           />
         </Field>
         <Field label="번호">

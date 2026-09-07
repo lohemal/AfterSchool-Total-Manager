@@ -192,7 +192,7 @@ pub fn grant_list(conn: &Connection, year_id: i64, program: &str) -> AppResult<V
            JOIN student s ON s.id = g.student_id
            LEFT JOIN support_period p ON p.id = g.period_id
           WHERE g.year_id = ?1 AND g.program = ?2
-          ORDER BY s.grade, s.class_no, s.student_no, COALESCE(p.seq, 0)",
+          ORDER BY s.grade, s.class_sort, s.class_no, s.student_no, COALESCE(p.seq, 0)",
     )?;
     let rows = st
         .query_map(params![year_id, program], |r| {

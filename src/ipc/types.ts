@@ -35,7 +35,7 @@ export interface WorkspaceInput {
 export interface Student {
   id: number
   grade: number
-  classNo: number
+  classNo: string
   studentNo: number
   name: string
   note: string
@@ -44,7 +44,7 @@ export interface Student {
 
 export interface StudentInput {
   grade: number
-  classNo: number
+  classNo: string
   studentNo: number
   name: string
   note?: string
@@ -53,7 +53,7 @@ export interface StudentInput {
 export interface StudentFilter {
   workspaceId?: number | null
   grade?: number | null
-  classNo?: number | null
+  classNo?: string | null
   studentNo?: number | null
   name?: string | null
   /** `VOUCHER` | `FREE_VOUCHER` | `BOTH` | `NONE` */
@@ -70,7 +70,7 @@ export interface Eligibility {
   source: 'MANUAL' | 'EXCEL'
   note: string
   grade: number
-  classNo: number
+  classNo: string
   studentNo: number
   name: string
   gradeMismatch: boolean
@@ -196,7 +196,7 @@ export interface Enrollment {
   studentId: number
   departmentId: number
   grade: number
-  classNo: number
+  classNo: string
   studentNo: number
   name: string
   programs: ProgramCode[]
@@ -224,7 +224,7 @@ export interface EnrollmentInput {
 export interface EnrollmentFilter {
   departmentId?: number | null
   grade?: number | null
-  classNo?: number | null
+  classNo?: string | null
   program?: string | null
   status?: EnrollStatus | null
   query?: string | null
@@ -234,7 +234,7 @@ export interface FeeDiff {
   enrollmentId: number
   studentId: number
   grade: number
-  classNo: number
+  classNo: string
   studentNo: number
   name: string
   departmentId: number
@@ -374,7 +374,7 @@ export interface BudgetView {
 export interface SelfPayRow {
   studentId: number
   grade: number
-  classNo: number
+  classNo: string
   studentNo: number
   name: string
   departmentId: number
@@ -391,7 +391,7 @@ export interface SelfPayRow {
 export interface ProgramRow {
   studentId: number
   grade: number
-  classNo: number
+  classNo: string
   studentNo: number
   name: string
   used: Fee[]
@@ -422,7 +422,7 @@ export interface Grant {
   id: number
   studentId: number
   grade: number
-  classNo: number
+  classNo: string
   studentNo: number
   name: string
   program: ProgramCode

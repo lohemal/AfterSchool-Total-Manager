@@ -3,6 +3,7 @@
 //! 여기 있는 코드는 `rusqlite`를 import하지 않으며, 입력도 출력도 평범한 구조체다.
 //! 그래야 정산 계산을 DB 없이 테스트할 수 있다 (설계안 1장).
 
+pub mod class_no;
 pub mod settle;
 pub mod support;
 
