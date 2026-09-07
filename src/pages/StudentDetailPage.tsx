@@ -2,7 +2,10 @@
  * 학생 상세정보 — **독립적인 조회 화면** (요구사항 §23).
  *
  * 수강생 명단에서 학생을 눌렀다고 이 화면이 저절로 채워지지 않는다.
- * 여기서 직접 조회한다. 학년·반·번호·이름 가운데 **하나만 넣어도** 찾는다.
+ * 여기서 직접 조회한다. 반·번호·이름 가운데 **하나만 넣어도** 찾는다.
+ *
+ * 조회 규칙(너무 넓은 조건 · AND · 정렬 · 20명씩)은 `lib/studentSearch.ts`에
+ * 순수 함수로 떼어 두었다. 화면은 그 결과를 그리기만 한다.
  *
  * 지원금 사용액·잔액은 **그 작업공간의 정산이 최신일 때만** 보여 준다.
  * 정산 전·재정산 필요·해당없음을 분명히 갈라 쓴다 — 낡은 숫자를 최신처럼 보이면 안 된다.
@@ -15,6 +18,7 @@ import { Button, Card, Empty, Field, Input, Notice, Select } from '@/components/
 import { api } from '@/ipc/api'
 import type { Student } from '@/ipc/types'
 import { compareClassNo, supportLabel, won } from '@/lib/format'
+import { hasCondition, PAGE, pageInfo, search, tooBroad } from '@/lib/studentSearch'
 import { useApp } from '@/lib/useApp'
 
 export function StudentDetailPage() {
@@ -26,6 +30,17 @@ export function StudentDetailPage() {
   const [studentNo, setStudentNo] = useState('')
   const [name, setName] = useState('')
   const [picked, setPicked] = useState<number | null>(null)
+  const [shown, setShown] = useState(PAGE)
+
+  /**
+   * 조건을 바꿀 때는 고른 학생과 [더 보기] 상태를 함께 되돌린다.
+   * 앞 검색에서 40명까지 펼쳐 둔 채 새 검색을 하면 갑자기 40명이 쏟아진다.
+   */
+  function onCondition(apply: () => void) {
+    apply()
+    setPicked(null)
+    setShown(PAGE)
+  }
 
   const all = useQuery({
     queryKey: ['students-all', app.yearId],
@@ -42,20 +57,16 @@ export function StudentDetailPage() {
     return [...new Set(list.map((s) => s.classNo))].sort(compareClassNo)
   }, [rows, grade])
 
-  const hasCondition =
-    grade !== '' || classNo !== '' || studentNo.trim() !== '' || name.trim() !== ''
+  const cond = useMemo(
+    () => ({ grade, classNo, studentNo, name }),
+    [grade, classNo, studentNo, name],
+  )
+  const asked = hasCondition(cond)
+  const broad = tooBroad(cond)
 
-  // 조건 가운데 **하나 이상**만 맞으면 찾는다.
-  const found: Student[] = useMemo(() => {
-    if (!hasCondition) return []
-    return rows.filter((s) => {
-      if (grade && s.grade !== Number(grade)) return false
-      if (classNo && s.classNo !== classNo) return false
-      if (studentNo.trim() && s.studentNo !== Number(studentNo.replace(/[^0-9]/g, ''))) return false
-      if (name.trim() && !s.name.includes(name.trim())) return false
-      return true
-    })
-  }, [rows, grade, classNo, studentNo, name, hasCondition])
+  // 조건은 AND 로 걸린다. 규칙은 lib/studentSearch.ts 에 있다.
+  const found: Student[] = useMemo(() => search(rows, cond), [rows, cond])
+  const page = pageInfo(found.length, Math.min(shown, found.length))
 
   const detail = useQuery({
     queryKey: ['student-detail', app.yearId, picked],
@@ -64,11 +75,12 @@ export function StudentDetailPage() {
   })
 
   function reset() {
-    setGrade('')
-    setClassNo('')
-    setStudentNo('')
-    setName('')
-    setPicked(null)
+    onCondition(() => {
+      setGrade('')
+      setClassNo('')
+      setStudentNo('')
+      setName('')
+    })
   }
 
   const d = detail.data
@@ -79,8 +91,8 @@ export function StudentDetailPage() {
         <div>
           <h1 className="page__title">학생 상세정보</h1>
           <p className="page__desc">
-            학년 · 반 · 번호 · 이름 가운데 하나만 넣어도 찾습니다. 다른 화면과 연동되지 않는
-            독립 조회 화면입니다.
+            반 · 번호 · 이름 가운데 하나만 넣어도 찾습니다. 학년만 고르면 학교 전체가 나오므로
+            조건을 하나 더 넣어 주세요. 다른 화면과 연동되지 않는 독립 조회 화면입니다.
           </p>
         </div>
       </div>
@@ -90,11 +102,12 @@ export function StudentDetailPage() {
           <Field label="학년">
             <Select
               value={grade}
-              onChange={(e) => {
-                setGrade(e.target.value)
-                setClassNo('')
-                setPicked(null)
-              }}
+              onChange={(e) =>
+                onCondition(() => {
+                  setGrade(e.target.value)
+                  setClassNo('')
+                })
+              }
               style={{ width: 96 }}
             >
               <option value="">전체</option>
@@ -108,10 +121,7 @@ export function StudentDetailPage() {
           <Field label="반">
             <Select
               value={classNo}
-              onChange={(e) => {
-                setClassNo(e.target.value)
-                setPicked(null)
-              }}
+              onChange={(e) => onCondition(() => setClassNo(e.target.value))}
               style={{ width: 96 }}
             >
               <option value="">전체</option>
@@ -128,10 +138,7 @@ export function StudentDetailPage() {
               value={studentNo}
               placeholder="예: 5"
               style={{ width: 84 }}
-              onChange={(e) => {
-                setStudentNo(e.target.value)
-                setPicked(null)
-              }}
+              onChange={(e) => onCondition(() => setStudentNo(e.target.value))}
             />
           </Field>
           <Field label="이름">
@@ -139,26 +146,35 @@ export function StudentDetailPage() {
               value={name}
               placeholder="이름 일부"
               style={{ width: 140 }}
-              onChange={(e) => {
-                setName(e.target.value)
-                setPicked(null)
-              }}
+              onChange={(e) => onCondition(() => setName(e.target.value))}
             />
           </Field>
           <Button onClick={reset}>초기화</Button>
         </div>
 
-        {hasCondition && (
+        {/*
+          전교생을 넣으면 한 학년이 100명을 넘는다. 학년만 고른 채로 다 그리면
+          화면이 쓸 수 없게 되므로, 무엇을 더 넣어야 하는지 알려 준다.
+        */}
+        {broad && (
+          <div style={{ marginTop: 12 }}>
+            <Notice tone="info">
+              검색 범위가 넓습니다. 반을 선택하거나 번호·이름을 입력해주세요.
+            </Notice>
+          </div>
+        )}
+
+        {asked && !broad && (
           <div style={{ marginTop: 12 }}>
             {found.length === 0 ? (
               <div className="hint">조건에 맞는 학생이 없습니다.</div>
             ) : (
               <>
                 <div className="hint" style={{ marginBottom: 6 }}>
-                  {found.length}명 — 이름을 누르면 상세정보가 열립니다.
+                  {page.label} — 이름을 누르면 상세정보가 열립니다.
                 </div>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, maxHeight: 132, overflow: 'auto' }}>
-                  {found.slice(0, 200).map((s) => (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, maxHeight: 176, overflow: 'auto' }}>
+                  {found.slice(0, shown).map((s) => (
                     <Button
                       key={s.id}
                       small
@@ -169,6 +185,13 @@ export function StudentDetailPage() {
                     </Button>
                   ))}
                 </div>
+                {page.more > 0 && (
+                  <div style={{ marginTop: 8 }}>
+                    <Button small onClick={() => setShown((n) => n + PAGE)}>
+                      {page.more}명 더 보기
+                    </Button>
+                  </div>
+                )}
               </>
             )}
           </div>

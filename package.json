@@ -10,8 +10,9 @@
     "tauri": "tauri",
     "app": "tauri dev",
     "app:build": "tauri build",
-    "check": "tsc --noEmit && cargo test --manifest-path src-tauri/Cargo.toml",
-    "version:set": "node scripts/set-version.mjs"
+    "check": "tsc --noEmit && vitest run && cargo test --manifest-path src-tauri/Cargo.toml",
+    "version:set": "node scripts/set-version.mjs",
+    "test": "vitest run"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.62.7",
@@ -29,6 +30,7 @@
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.4",
     "typescript": "^5.7.2",
-    "vite": "^6.0.3"
+    "vite": "^6.0.3",
+    "vitest": "^2.1.9"
   }
 }
