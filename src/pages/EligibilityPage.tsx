@@ -154,7 +154,7 @@ export function EligibilityPage() {
       {view.data && mismatch === 0 && view.data.targetGradeText === '전 학년' && program === 'VOUCHER' && (
         <Notice tone="info">
           아직 대상학년을 정하지 않았습니다. [시스템 › 학년도 지원금 설정]에서 정하면
-          대상학년이 아닌 학생을 여기서 알려 줍니다. (Phase 3)
+          대상학년이 아닌 학생을 여기서 알려 줍니다.
         </Notice>
       )}
 
