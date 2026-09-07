@@ -167,10 +167,12 @@ export const api = {
     invoke<number>('enrollment_create', { workspaceId, input }),
   enrollmentUpdateFees: (id: number, fees: Fee[], reason: string) =>
     invoke<void>('enrollment_update_fees', { id, fees, reason }),
-  enrollmentCancel: (id: number, reason: string) =>
-    invoke<void>('enrollment_cancel', { id, reason }),
-  enrollmentRestore: (id: number, reason: string) =>
-    invoke<void>('enrollment_restore', { id, reason }),
+  /** `fees`를 주면 취소 후 최종 징수금액을 함께 확정한다 (한 트랜잭션). */
+  enrollmentCancel: (id: number, fees: Fee[] | null, reason: string) =>
+    invoke<void>('enrollment_cancel', { id, fees, reason }),
+  /** `resetFees`가 true면 부서 기준금액으로 되돌린다. 기본은 그대로 둔다. */
+  enrollmentRestore: (id: number, resetFees: boolean, reason: string) =>
+    invoke<void>('enrollment_restore', { id, resetFees, reason }),
   enrollmentSaveStudentFees: (edits: StudentFeeEdit[], reason: string) =>
     invoke<number>('enrollment_save_student_fees', { edits, reason }),
   enrollmentFeeDiff: (workspaceId: number, departmentId: number | null) =>

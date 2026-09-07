@@ -227,7 +227,7 @@ fn 전체_흐름_부서금액_변경이_기존_학생에게_저절로_옮겨가�
     assert_eq!(f.amount(e_hana, TEXTBOOK), 0, "면제해 둔 교재비가 되살아나면 안 된다");
 
     // ⑥ 수강 취소 — 행은 남는다
-    f.db.write(|c| repo::enrollment::cancel(c, e_duri, "개인 사정", &f.items))
+    f.db.write(|c| repo::enrollment::cancel(c, e_duri, None, "개인 사정", &f.items))
         .unwrap();
     let rows = f.roster();
     assert_eq!(rows.len(), 2, "취소해도 명단에서 사라지지 않는다");
@@ -402,7 +402,7 @@ fn 취소한_뒤_다시_등록할_수_있다() {
     let dept = f.department("로봇과학", vec![fee(INSTRUCTOR, 40_000)]);
     let e = f.enroll(hana, dept);
 
-    f.db.write(|c| repo::enrollment::cancel(c, e, "전학", &f.items))
+    f.db.write(|c| repo::enrollment::cancel(c, e, None, "전학", &f.items))
         .unwrap();
     // 취소 상태에서는 다시 등록이 된다 (부분 유니크 인덱스)
     let e2 = f.enroll(hana, dept);
@@ -419,7 +419,7 @@ fn 취소_사유는_반드시_받는다() {
 
     let err = f
         .db
-        .write(|c| repo::enrollment::cancel(c, e, "   ", &f.items))
+        .write(|c| repo::enrollment::cancel(c, e, None, "   ", &f.items))
         .unwrap_err();
     assert!(err.message.contains("변경사유"));
 }
@@ -430,13 +430,13 @@ fn 복원은_같은_수강이_이미_있으면_막힌다() {
     let hana = f.student(3, 1, 1, "김하나");
     let dept = f.department("로봇과학", vec![fee(INSTRUCTOR, 40_000)]);
     let e = f.enroll(hana, dept);
-    f.db.write(|c| repo::enrollment::cancel(c, e, "착오", &f.items))
+    f.db.write(|c| repo::enrollment::cancel(c, e, None, "착오", &f.items))
         .unwrap();
     f.enroll(hana, dept); // 새로 등록해 버렸다
 
     let err = f
         .db
-        .write(|c| repo::enrollment::restore(c, e, "되돌림", &f.items))
+        .write(|c| repo::enrollment::restore(c, e, false, "되돌림", &f.items))
         .unwrap_err();
     assert!(err.message.contains("이미 수강 중"), "{}", err.message);
 }
@@ -447,9 +447,9 @@ fn 복원하면_다시_수강중이_되고_이력이_남는다() {
     let hana = f.student(3, 1, 1, "김하나");
     let dept = f.department("로봇과학", vec![fee(INSTRUCTOR, 40_000)]);
     let e = f.enroll(hana, dept);
-    f.db.write(|c| repo::enrollment::cancel(c, e, "착오", &f.items))
+    f.db.write(|c| repo::enrollment::cancel(c, e, None, "착오", &f.items))
         .unwrap();
-    f.db.write(|c| repo::enrollment::restore(c, e, "취소 착오", &f.items))
+    f.db.write(|c| repo::enrollment::restore(c, e, false, "취소 착오", &f.items))
         .unwrap();
 
     let row = f
@@ -484,7 +484,7 @@ fn 수강상태와_부서로_거를_수_있다() {
     let art = f.department("미술", vec![fee(INSTRUCTOR, 25_000)]);
     let e1 = f.enroll(hana, robot);
     f.enroll(duri, art);
-    f.db.write(|c| repo::enrollment::cancel(c, e1, "사정", &f.items))
+    f.db.write(|c| repo::enrollment::cancel(c, e1, None, "사정", &f.items))
         .unwrap();
 
     let only_active = f

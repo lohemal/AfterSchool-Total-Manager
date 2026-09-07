@@ -77,19 +77,33 @@ pub fn enrollment_update_fees(
     })
 }
 
+/// 수강 취소. `fees`를 주면 최종 징수금액을 함께 확정한다 (v0.1.3).
+///
+/// `db.write`가 트랜잭션을 감싸므로 금액·상태·이력이 함께 커밋되거나
+/// 함께 되돌아간다.
 #[tauri::command]
-pub fn enrollment_cancel(db: State<'_, Db>, id: i64, reason: String) -> AppResult<()> {
+pub fn enrollment_cancel(
+    db: State<'_, Db>,
+    id: i64,
+    fees: Option<Vec<Fee>>,
+    reason: String,
+) -> AppResult<()> {
     db.write(|c| {
         let items = repo::cost_items(c)?;
-        repo::enrollment::cancel(c, id, &reason, &items)
+        repo::enrollment::cancel(c, id, fees.as_deref(), &reason, &items)
     })
 }
 
 #[tauri::command]
-pub fn enrollment_restore(db: State<'_, Db>, id: i64, reason: String) -> AppResult<()> {
+pub fn enrollment_restore(
+    db: State<'_, Db>,
+    id: i64,
+    reset_fees: Option<bool>,
+    reason: String,
+) -> AppResult<()> {
     db.write(|c| {
         let items = repo::cost_items(c)?;
-        repo::enrollment::restore(c, id, &reason, &items)
+        repo::enrollment::restore(c, id, reset_fees.unwrap_or(false), &reason, &items)
     })
 }
 

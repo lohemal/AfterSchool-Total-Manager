@@ -640,7 +640,7 @@ fn 낡은_정산으로는_정산_Excel도_만들지_않는다() {
     p.settle();
     assert!(p.db.read(|c| repo::settle::require_fresh(c, p.ws)).is_ok());
 
-    p.db.write(|c| repo::enrollment::cancel(c, e, "전학", &p.items))
+    p.db.write(|c| repo::enrollment::cancel(c, e, None, "전학", &p.items))
         .unwrap();
     assert!(p.db.read(|c| repo::settle::require_fresh(c, p.ws)).is_err());
 }

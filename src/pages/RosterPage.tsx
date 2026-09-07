@@ -11,6 +11,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useMemo, useState } from 'react'
 
 import { ApplyFeesModal } from '@/components/ApplyFeesModal'
+import { CancelModal } from '@/components/CancelModal'
 import { cmp, DataTable, type Column } from '@/components/DataTable'
 import { EnrollmentModal } from '@/components/EnrollmentModal'
 import { ExcelTools } from '@/components/ExcelTools'
@@ -371,14 +372,9 @@ export function RosterPage() {
       )}
 
       {cancelling && (
-        <ReasonModal
-          title="수강 취소"
+        <CancelModal
           target={cancelling}
-          confirmText="취소 처리"
-          danger
-          hint="자료를 지우지 않고 상태만 취소로 바꿉니다. 되돌릴 수 있습니다."
-          required
-          run={(reason) => api.enrollmentCancel(cancelling.id, reason)}
+          items={items}
           onClose={() => setCancelling(null)}
           onDone={() => {
             setCancelling(null)
@@ -389,12 +385,8 @@ export function RosterPage() {
       )}
 
       {restoring && (
-        <ReasonModal
-          title="취소 되돌리기"
+        <RestoreModal
           target={restoring}
-          confirmText="되돌리기"
-          hint="이 수강을 다시 수강중으로 바꿉니다."
-          run={(reason) => api.enrollmentRestore(restoring.id, reason)}
           onClose={() => setRestoring(null)}
           onDone={() => {
             setRestoring(null)
@@ -442,35 +434,30 @@ export function RosterPage() {
   )
 }
 
-/** 사유를 받고 한 가지 일을 하는 작은 창 — 취소·복원에서 함께 쓴다. */
-function ReasonModal({
-  title,
+/**
+ * 취소 되돌리기.
+ *
+ * **금액을 저절로 되돌리지 않는다.** 취소할 때 담당자가 확정한 징수금액을
+ * 그대로 둔다 — 프로그램이 임의로 바꾸면 그 판단이 조용히 사라진다.
+ * 다시 받아야 한다면 사람이 [부서 기준금액으로 되돌리기]를 고른다.
+ */
+function RestoreModal({
   target,
-  confirmText,
-  hint,
-  danger,
-  required,
-  run,
   onClose,
   onDone,
 }: {
-  title: string
   target: Enrollment
-  confirmText: string
-  hint: string
-  danger?: boolean
-  required?: boolean
-  run: (reason: string) => Promise<void>
   onClose: () => void
   onDone: () => void
 }) {
   const toast = useToast()
   const [reason, setReason] = useState('')
+  const [reset, setReset] = useState(false)
 
   const act = useMutation({
-    mutationFn: () => run(reason.trim()),
+    mutationFn: () => api.enrollmentRestore(target.id, reset, reason.trim()),
     onSuccess: () => {
-      toast.ok(`${title}되었습니다.`)
+      toast.ok('되돌렸습니다.')
       onDone()
     },
     onError: (e) => toast.bad(errorMessage(e)),
@@ -478,17 +465,13 @@ function ReasonModal({
 
   return (
     <Modal
-      title={title}
+      title="취소 되돌리기"
       onClose={onClose}
       footer={
         <>
           <Button onClick={onClose}>닫기</Button>
-          <Button
-            variant={danger ? 'danger' : 'primary'}
-            onClick={() => act.mutate()}
-            disabled={act.isPending || (required && reason.trim() === '')}
-          >
-            {act.isPending ? '처리 중…' : confirmText}
+          <Button variant="primary" onClick={() => act.mutate()} disabled={act.isPending}>
+            {act.isPending ? '처리 중…' : '되돌리기'}
           </Button>
         </>
       }
@@ -496,21 +479,32 @@ function ReasonModal({
       <div style={{ lineHeight: 1.8, marginBottom: 12 }}>
         {target.grade}학년 {target.classNo}반 {target.studentNo}번 <b>{target.name}</b>
         <br />
-        <b>{target.deptLabel}</b> · {won(target.total)}원
+        <b>{target.deptLabel}</b>
       </div>
 
-      <Field label={required ? '변경사유 (필수)' : '변경사유'} hint={hint}>
+      <Notice tone="info">
+        현재 금액은 취소할 때 확정한 <b>{won(target.total)}원</b>입니다. 되돌려도 이 금액을
+        그대로 둡니다.
+      </Notice>
+
+      <label
+        style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '12px 0', cursor: 'pointer' }}
+      >
+        <input type="checkbox" checked={reset} onChange={(e) => setReset(e.target.checked)} />
+        <span>부서 기준금액으로 되돌리기</span>
+      </label>
+      <div className="hint" style={{ marginTop: -6, marginBottom: 4 }}>
+        다시 처음부터 수강하는 경우에만 고르세요. 학생별로 고쳐 둔 금액이 사라집니다.
+      </div>
+
+      <Field label="변경사유" hint="이 수강을 다시 수강중으로 바꿉니다.">
         <Input
           autoFocus
           value={reason}
-          placeholder="개인 사정 · 전학 · 착오 등"
+          placeholder="착오 · 취소 철회 등"
           onChange={(e) => setReason(e.target.value)}
         />
       </Field>
-
-      <div className="hint" style={{ marginTop: 10 }}>
-        변경한 시각은 변경이력에 자동으로 남습니다. 취소일을 따로 입력하지 않습니다.
-      </div>
     </Modal>
   )
 }

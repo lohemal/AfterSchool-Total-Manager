@@ -648,9 +648,27 @@ fn workspace_of(conn: &Connection, enrollment_id: i64) -> AppResult<i64> {
 }
 
 /// 수강 취소 — 행을 지우지 않고 상태만 바꾼다 (§42-4).
-pub fn cancel(conn: &Connection, id: i64, reason: &str, items: &[CostItem]) -> AppResult<()> {
-    let row = get(conn, id, items)?;
-    if row.status == "CANCELLED" {
+///
+/// ## 취소는 전액 0원이 아니다 (v0.1.3)
+///
+/// 중도에 그만두어도 이미 발생한 비용은 징수한다. 교재비·재료비는 배부한
+/// 뒤라면 환불하지 않고, 강사료·수용비는 실제 수강한 만큼 받는다.
+/// 그래서 취소할 때 **최종 징수금액을 함께 받는다.**
+///
+/// `fees` 가 `None` 이면 지금 금액을 그대로 둔다. 프로그램이 금액을 스스로
+/// 정하지 않는다 — 실제 상황은 담당자만 안다.
+///
+/// 금액 수정과 상태 변경과 이력을 **한 트랜잭션**으로 처리한다
+/// (`Db::write` 가 감싼다). 따로 하면 "취소는 됐는데 금액은 그대로"가 남는다.
+pub fn cancel(
+    conn: &Connection,
+    id: i64,
+    fees: Option<&[Fee]>,
+    reason: &str,
+    items: &[CostItem],
+) -> AppResult<()> {
+    let before = get(conn, id, items)?;
+    if before.status == "CANCELLED" {
         return Err(AppError::invalid("이미 취소된 수강입니다."));
     }
     let reason = reason.trim();
@@ -658,6 +676,14 @@ pub fn cancel(conn: &Connection, id: i64, reason: &str, items: &[CostItem]) -> A
         return Err(AppError::invalid("변경사유를 입력해 주세요."));
     }
     let ws = workspace_of(conn, id)?;
+
+    // 1) 최종 징수금액
+    if let Some(fees) = fees {
+        let base = base_fees(conn, before.department_id, items)?;
+        write_charges(conn, id, fees, &base)?;
+    }
+
+    // 2) 상태
     conn.execute(
         "UPDATE enrollment
             SET status = 'CANCELLED', change_reason = ?2,
@@ -665,27 +691,50 @@ pub fn cancel(conn: &Connection, id: i64, reason: &str, items: &[CostItem]) -> A
           WHERE id = ?1",
         params![id, reason],
     )?;
+
+    // 3) 이력 — 한 번의 취소를 한 줄로 남긴다. 상태와 금액을 두 줄로 쪼개면
+    //    "왜 금액이 줄었나"를 두 줄을 맞춰 봐야 알 수 있다.
+    let after = get(conn, id, items)?;
     log::write(
         conn,
         year_of_workspace(conn, ws)?,
         Some(ws),
         log::ENROLL_CANCEL,
-        Some(row.student_id),
-        Some(row.department_id),
+        Some(before.student_id),
+        Some(before.department_id),
         &format!(
             "{} / {}",
-            student_label(row.grade, &row.class_no, row.student_no, &row.name),
-            row.dept_label
+            student_label(before.grade, &before.class_no, before.student_no, &before.name),
+            before.dept_label
         ),
-        "수강중",
-        "취소",
+        &status_fees_text(items, "수강중", &before.fees, before.total),
+        &status_fees_text(items, "취소", &after.fees, after.total),
         reason,
     )?;
     Ok(())
 }
 
+/// `취소 · 강사료 15,000 · … · 합계 41,500` — 이력의 이전값/변경값.
+fn status_fees_text(items: &[CostItem], status: &str, fees: &[Fee], total: i64) -> String {
+    format!(
+        "{status} · {} · 합계 {}",
+        fees_text(items, fees),
+        won(total)
+    )
+}
+
 /// 취소한 수강을 되돌린다.
-pub fn restore(conn: &Connection, id: i64, reason: &str, items: &[CostItem]) -> AppResult<()> {
+///
+/// **금액을 저절로 되돌리지 않는다** (v0.1.3). 취소할 때 담당자가 확정한
+/// 징수금액을 그대로 둔다 — 프로그램이 임의로 부서 기준금액으로 바꾸면 그
+/// 판단이 조용히 사라진다. 다시 받아야 한다면 `reset_fees = true`로 부른다.
+pub fn restore(
+    conn: &Connection,
+    id: i64,
+    reset_fees: bool,
+    reason: &str,
+    items: &[CostItem],
+) -> AppResult<()> {
     let row = get(conn, id, items)?;
     if row.status == "ACTIVE" {
         return Err(AppError::invalid("이미 수강 중입니다."));
@@ -708,6 +757,14 @@ pub fn restore(conn: &Connection, id: i64, reason: &str, items: &[CostItem]) -> 
             e.into()
         }
     })?;
+
+    // 사람이 고른 경우에만 부서 기준금액으로 되돌린다.
+    if reset_fees {
+        let base = base_fees(conn, row.department_id, items)?;
+        write_charges(conn, id, &base, &base)?;
+    }
+
+    let after = get(conn, id, items)?;
     log::write(
         conn,
         year_of_workspace(conn, ws)?,
@@ -720,8 +777,8 @@ pub fn restore(conn: &Connection, id: i64, reason: &str, items: &[CostItem]) -> 
             student_label(row.grade, &row.class_no, row.student_no, &row.name),
             row.dept_label
         ),
-        "취소",
-        "수강중",
+        &status_fees_text(items, "취소", &row.fees, row.total),
+        &status_fees_text(items, "수강중", &after.fees, after.total),
         reason.trim(),
     )?;
     Ok(())

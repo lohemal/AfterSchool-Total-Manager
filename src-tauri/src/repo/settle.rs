@@ -26,6 +26,27 @@ use crate::repo::enrollment::dept_label;
 
 const PROGRAMS: [Program; 2] = [Program::Voucher, Program::FreeVoucher];
 
+/// **정산 대상 수강은 상태가 아니라 금액으로 정한다** (v0.1.3, 최종 QA).
+///
+/// 중도에 수강을 취소해도 이미 발생한 비용은 징수한다. 교재비·재료비는 배부한
+/// 뒤라면 환불하지 않고, 강사료·수용비는 실제 수강한 만큼 받는다. 그래서
+/// **`status = 'ACTIVE'` 로 걸러서는 안 된다** — 그렇게 하면 취소한 학생의
+/// 징수금액 전체가 정산에서 사라진다.
+///
+/// ```text
+/// ACTIVE    + 금액 있음  → 정산
+/// CANCELLED + 금액 있음  → 정산   ← 예전에는 여기가 빠졌다
+/// CANCELLED + 전액 0원   → 정산할 것이 없음
+/// ```
+///
+/// `status` 는 "지금 수강 중인가"만 뜻한다. 그래서 **부서 수강인원·학년도
+/// 수강인원·중복 등록 방지에는 `ACTIVE` 조건을 그대로 둔다** — 그것들은
+/// 금액이 아니라 실제 수강 중인 사람을 묻는 질문이다.
+///
+/// 이 조각은 `enrollment` 를 `e` 로 부르는 질의에서만 쓴다.
+const SETTLE_TARGET: &str =
+    "EXISTS (SELECT 1 FROM charge ct WHERE ct.enrollment_id = e.id AND ct.amount > 0)";
+
 // ─────────────────────────────────────────────── 정책과 기간
 
 struct PeriodDef {
@@ -317,13 +338,44 @@ pub fn validate(conn: &Connection, workspace_id: i64) -> AppResult<Vec<Issue>> {
     let ctx = Ctx::load(conn, workspace_id)?;
     let items = repo::cost_items(conn)?;
 
-    // 수강 자료
-    let active = repo::enrollment::count_active(conn, workspace_id)?;
-    if active == 0 {
+    // 수강 자료 — 정산 대상은 상태가 아니라 금액으로 센다 (SETTLE_TARGET 참고)
+    let targets: i64 = conn.query_row(
+        &format!(
+            "SELECT COUNT(*) FROM enrollment e
+              WHERE e.workspace_id = ?1 AND {SETTLE_TARGET}"
+        ),
+        params![workspace_id],
+        |r| r.get(0),
+    )?;
+    if targets == 0 {
         out.push(Issue {
             level: "WARN".into(),
             code: "NO_ENROLLMENT".into(),
-            message: "수강 중인 자료가 없습니다. 빈 정산이 만들어집니다.".into(),
+            message: "정산할 금액이 있는 수강이 없습니다. 빈 정산이 만들어집니다.".into(),
+        });
+    }
+
+    // 예전 버전에서 취소한 수강은 금액이 취소 전 그대로 남아 있을 수 있다.
+    // 그것이 이제 정산에 들어가므로 **프로그램이 추측하지 않고 사람에게 확인시킨다** —
+    // 0원으로 만들면 징수할 돈을 놓치고, 전액으로 두면 안 받을 돈을 받는다.
+    let stale_cancels: i64 = conn.query_row(
+        &format!(
+            "SELECT COUNT(*) FROM enrollment e
+              WHERE e.workspace_id = ?1 AND e.status = 'CANCELLED' AND {SETTLE_TARGET}
+                AND NOT EXISTS (SELECT 1 FROM charge c2
+                                 WHERE c2.enrollment_id = e.id AND c2.is_overridden = 1)"
+        ),
+        params![workspace_id],
+        |r| r.get(0),
+    )?;
+    if stale_cancels > 0 {
+        out.push(Issue {
+            level: "WARN".into(),
+            code: "CANCEL_FULL_AMOUNT".into(),
+            message: format!(
+                "취소된 수강 {stale_cancels}건의 금액이 부서 기준금액 그대로입니다. \
+                 실제 징수할 금액인지 확인해 주세요 (수강생 명단 → 상태: 취소)."
+            ),
         });
     }
 
@@ -342,10 +394,11 @@ pub fn validate(conn: &Connection, workspace_id: i64) -> AppResult<Vec<Issue>> {
             message: format!("금액이 없는 수강이 {broken}건 있습니다. 수강생 명단에서 확인해 주세요."),
         });
     }
+    // 음수는 상태와 무관하게 다 본다 — 취소 건에 음수가 있으면 불변식이 깨진다.
     let negative: i64 = conn.query_row(
         "SELECT COUNT(*) FROM charge c
            JOIN enrollment e ON e.id = c.enrollment_id
-          WHERE e.workspace_id = ?1 AND e.status = 'ACTIVE' AND c.amount < 0",
+          WHERE e.workspace_id = ?1 AND c.amount < 0",
         params![workspace_id],
         |r| r.get(0),
     )?;
@@ -363,11 +416,14 @@ pub fn validate(conn: &Connection, workspace_id: i64) -> AppResult<Vec<Issue>> {
         let label = program.label();
 
         let holders: i64 = conn.query_row(
-            "SELECT COUNT(DISTINCT e.student_id)
-               FROM enrollment e
-               JOIN support_eligibility el
-                      ON el.student_id = e.student_id AND el.year_id = ?1 AND el.program = ?3
-              WHERE e.workspace_id = ?2 AND e.status = 'ACTIVE'",
+            &format!(
+                "SELECT COUNT(DISTINCT e.student_id)
+                   FROM enrollment e
+                   JOIN support_eligibility el
+                          ON el.student_id = e.student_id AND el.year_id = ?1
+                         AND el.program = ?3
+                  WHERE e.workspace_id = ?2 AND {SETTLE_TARGET}"
+            ),
             params![ctx.year_id, workspace_id, program.code()],
             |r| r.get(0),
         )?;
@@ -427,7 +483,7 @@ pub fn validate(conn: &Connection, workspace_id: i64) -> AppResult<Vec<Issue>> {
                    FROM support_eligibility el
                    JOIN student s ON s.id = el.student_id
                    JOIN enrollment e ON e.student_id = s.id
-                                    AND e.workspace_id = ?2 AND e.status = 'ACTIVE'
+                                    AND e.workspace_id = ?2 AND {SETTLE_TARGET}
                   WHERE el.year_id = ?1 AND el.program = ?3 AND s.grade NOT IN ({list})"
             );
             let n: i64 = conn.query_row(&sql, params![ctx.year_id, workspace_id, program.code()], |r| {
@@ -672,13 +728,17 @@ pub fn generate(conn: &Connection, workspace_id: i64) -> AppResult<GenerateResul
     let program_order = load_program_order(conn)?;
     let cfg = Config::new(program_order.clone(), &dept_order, &item_order);
 
-    // ACTIVE 수강의 charge를 학생별로 모은다
+    // 정산 대상 charge를 학생별로 모은다.
+    //
+    // **상태로 걸러지 않는다** (SETTLE_TARGET 참고). 취소한 수강도 징수할 금액이
+    // 남아 있으면 여기 들어온다. `c.amount > 0` 만 보므로 전액 면제한 취소는
+    // 자연히 빠지고, 0원짜리 배분 행이 만들어지는 일도 없다.
     let mut st = conn.prepare(
         "SELECT e.student_id, s.grade, e.id, e.department_id, c.item_code, c.amount
            FROM enrollment e
            JOIN student s ON s.id = e.student_id
            JOIN charge  c ON c.enrollment_id = e.id
-          WHERE e.workspace_id = ?1 AND e.status = 'ACTIVE'",
+          WHERE e.workspace_id = ?1 AND c.amount > 0",
     )?;
     let raw = st
         .query_map(params![workspace_id], |r| {
@@ -927,11 +987,13 @@ pub fn summary(conn: &Connection, workspace_id: i64, items: &[CostItem]) -> AppR
         rows.push(row);
     }
 
-    // 원본 charge와 견준다 — 어긋나면 화면에 붉게 띄운다
+    // 원본 charge와 견준다 — 어긋나면 화면에 붉게 띄운다.
+    // **정산에 넣은 것과 똑같은 집합**이어야 한다. 한쪽만 상태로 걸러면
+    // 취소자가 있는 작업공간에서 늘 어긋난다고 나온다.
     let charge_total: i64 = conn.query_row(
         "SELECT COALESCE(SUM(c.amount), 0) FROM charge c
            JOIN enrollment e ON e.id = c.enrollment_id
-          WHERE e.workspace_id = ?1 AND e.status = 'ACTIVE'",
+          WHERE e.workspace_id = ?1 AND c.amount > 0",
         params![workspace_id],
         |r| r.get(0),
     )?;
@@ -1271,9 +1333,11 @@ pub fn history(conn: &Connection, workspace_id: i64) -> AppResult<Vec<(i64, Stri
 pub fn voucher_holder_count(conn: &Connection, workspace_id: i64) -> AppResult<i64> {
     let ctx = Ctx::load(conn, workspace_id)?;
     let mut st = conn.prepare(
-        "SELECT DISTINCT e.student_id, s.grade FROM enrollment e
-           JOIN student s ON s.id = e.student_id
-          WHERE e.workspace_id = ?1 AND e.status = 'ACTIVE'",
+        &format!(
+            "SELECT DISTINCT e.student_id, s.grade FROM enrollment e
+               JOIN student s ON s.id = e.student_id
+              WHERE e.workspace_id = ?1 AND {SETTLE_TARGET}"
+        ),
     )?;
     let rows = st
         .query_map(params![workspace_id], |r| {

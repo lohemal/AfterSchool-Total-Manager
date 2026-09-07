@@ -294,7 +294,8 @@ fn 대상학년이_아니면_명단에_있어도_지원되지_않는다() {
 }
 
 #[test]
-fn 취소된_수강은_정산에서_빠진다() {
+fn 전액_면제로_취소하면_정산에서_빠진다() {
+    // v0.1.3 부터 취소 자체가 제외 조건이 아니다. **전액 0원**일 때만 빠진다.
     let s = S::new();
     let ws = s.ws("4월", "2026-04-01", "2026-04-30");
     let hana = s.student(3, 1, 1, "김하나");
@@ -304,11 +305,13 @@ fn 취소된_수강은_정산에서_빠진다() {
     let e2 = s.enroll(ws, duri, d);
     학기제(&s, false);
 
-    s.db.write(|c| repo::enrollment::cancel(c, e2, "전학", &s.items))
-        .unwrap();
+    s.db.write(|c| {
+        repo::enrollment::cancel(c, e2, Some(&[fee(강사료, 0)]), "개강 전 취소", &s.items)
+    })
+    .unwrap();
     s.generate(ws);
 
-    assert_eq!(s.fund(ws, "SELF_PAY"), 40_000, "취소한 학생은 빠진다");
+    assert_eq!(s.fund(ws, "SELF_PAY"), 40_000, "전액 면제한 취소자는 빠진다");
     assert!(s.summary(ws).balanced);
 }
 
@@ -774,7 +777,7 @@ fn 수강을_취소해도_낡음이_된다() {
     학기제(&s, false);
     s.generate(ws);
 
-    s.db.write(|c| repo::enrollment::cancel(c, e, "전학", &s.items))
+    s.db.write(|c| repo::enrollment::cancel(c, e, None, "전학", &s.items))
         .unwrap();
     assert_eq!(s.status(ws).state, "STALE_DATA");
     // 기존 정산은 조용히 바뀌지 않는다
@@ -1207,4 +1210,407 @@ fn 수익자_이용권_자유수강권_Excel에_한글_반이_그대로_나온�
             assert_eq!(sheet.cell(cells, Some(c)), 기대, "{path}");
         }
     }
+}
+
+// ─────────────────────────────────────────── 취소자 정산 (v0.1.3, 최종 QA)
+//
+// **취소 = 전액 0원이 아니다.** 중도에 그만두어도 이미 발생한 비용은 징수한다.
+// 교재비·재료비는 배부한 뒤라면 환불하지 않고, 강사료·수용비는 실제 수강한 만큼
+// 받는다. 그래서 `status` 가 아니라 charge 금액이 정산 대상을 정한다.
+
+const 수용비: &str = "OPERATION";
+const 재료비: &str = "MATERIAL";
+
+/// 요구사항에 적힌 그 예시 — 58,000원 가운데 41,500원을 징수한다.
+fn 중도취소_금액() -> Vec<Fee> {
+    vec![
+        fee(강사료, 15_000),
+        fee(수용비, 1_500),
+        fee(교재비, 15_000),
+        fee(재료비, 10_000),
+    ]
+}
+
+fn 원래_금액() -> Vec<Fee> {
+    vec![
+        fee(강사료, 30_000),
+        fee(수용비, 3_000),
+        fee(교재비, 15_000),
+        fee(재료비, 10_000),
+    ]
+}
+
+fn 전액면제() -> Vec<Fee> {
+    vec![
+        fee(강사료, 0),
+        fee(수용비, 0),
+        fee(교재비, 0),
+        fee(재료비, 0),
+    ]
+}
+
+fn 취소(s: &S, e: i64, fees: Option<&[Fee]>, reason: &str) {
+    s.db.write(|c| repo::enrollment::cancel(c, e, fees, reason, &s.items))
+        .unwrap();
+}
+
+fn 총배분(s: &S, ws: i64) -> i64 {
+    let t = s.summary(ws).total;
+    t.self_pay + t.voucher + t.voucher_over + t.free_voucher
+}
+
+#[test]
+fn 취소해도_최종_징수금액이_정산에_들어간다() {
+    let s = S::new();
+    let ws = s.ws("4월", "2026-04-01", "2026-04-30");
+    let hana = s.student(3, 1, 1, "김하나");
+    let d = s.dept(ws, "로봇과학", 원래_금액());
+    let e = s.enroll(ws, hana, d);
+    학기제(&s, false);
+
+    취소(&s, e, Some(&중도취소_금액()), "5월 중도 포기, 교재·재료 배부 완료");
+    s.generate(ws);
+
+    assert_eq!(s.fund(ws, "SELF_PAY"), 41_500, "취소해도 41,500원은 징수한다");
+    assert!(s.summary(ws).balanced);
+}
+
+#[test]
+fn 취소_전액_0원이면_배분이_없다() {
+    let s = S::new();
+    let ws = s.ws("4월", "2026-04-01", "2026-04-30");
+    let hana = s.student(3, 1, 1, "김하나");
+    let d = s.dept(ws, "로봇과학", 원래_금액());
+    let e = s.enroll(ws, hana, d);
+    학기제(&s, false);
+
+    취소(&s, e, Some(&전액면제()), "개강 전 취소");
+    s.generate(ws);
+
+    assert_eq!(총배분(&s, ws), 0);
+    assert!(s.summary(ws).balanced, "0원이어도 배분 합계는 맞아야 한다");
+}
+
+#[test]
+fn 취소자가_일반학생이면_수익자로_간다() {
+    let s = S::new();
+    let ws = s.ws("4월", "2026-04-01", "2026-04-30");
+    let hana = s.student(3, 1, 1, "김하나");
+    let d = s.dept(ws, "로봇과학", 원래_금액());
+    let e = s.enroll(ws, hana, d);
+    학기제(&s, false);
+
+    취소(&s, e, Some(&중도취소_금액()), "중도 포기");
+    s.generate(ws);
+
+    assert_eq!(s.fund(ws, "SELF_PAY"), 41_500);
+    assert_eq!(s.fund(ws, "VOUCHER"), 0);
+    assert!(s.summary(ws).balanced);
+}
+
+#[test]
+fn 취소자가_이용권_대상이면_이용권에서_나간다() {
+    let s = S::new();
+    let ws = s.ws("4월", "2026-04-01", "2026-04-30");
+    let hana = s.student(3, 1, 1, "김하나");
+    let d = s.dept(ws, "로봇과학", 원래_금액());
+    let e = s.enroll(ws, hana, d);
+    학기제(&s, false);
+    s.elig(hana, Program::Voucher);
+
+    취소(&s, e, Some(&중도취소_금액()), "중도 포기");
+    s.generate(ws);
+
+    assert_eq!(s.fund(ws, "VOUCHER"), 41_500);
+    assert_eq!(s.fund(ws, "SELF_PAY"), 0);
+    assert!(s.summary(ws).balanced);
+}
+
+#[test]
+fn 취소자가_이용권_한도를_넘기면_초과금이_된다() {
+    let s = S::new();
+    let ws = s.ws("4월", "2026-04-01", "2026-04-30");
+    let hana = s.student(3, 1, 1, "김하나");
+    let d = s.dept(ws, "로봇과학", vec![fee(강사료, 400_000)]);
+    let e = s.enroll(ws, hana, d);
+    학기제(&s, false); // 이용권 1학기 250,000
+    s.elig(hana, Program::Voucher);
+
+    취소(&s, e, Some(&[fee(강사료, 300_000)]), "중도 포기");
+    s.generate(ws);
+
+    assert_eq!(s.fund(ws, "VOUCHER"), 250_000);
+    assert_eq!(s.fund(ws, "VOUCHER_OVER"), 50_000, "한도를 넘은 만큼 초과금");
+    assert!(s.summary(ws).balanced);
+}
+
+#[test]
+fn 취소자가_자유수강권_대상이면_자유수강권에서_나간다() {
+    let s = S::new();
+    let ws = s.ws("4월", "2026-04-01", "2026-04-30");
+    let hana = s.student(3, 1, 1, "김하나");
+    let d = s.dept(ws, "로봇과학", 원래_금액());
+    let e = s.enroll(ws, hana, d);
+    학기제(&s, false);
+    s.policy(Program::FreeVoucher, 600_000, false, "", &[]);
+    s.elig(hana, Program::FreeVoucher);
+
+    취소(&s, e, Some(&중도취소_금액()), "중도 포기");
+    s.generate(ws);
+
+    assert_eq!(s.fund(ws, "FREE_VOUCHER"), 41_500);
+    assert_eq!(s.fund(ws, "SELF_PAY"), 0);
+    assert!(s.summary(ws).balanced);
+}
+
+#[test]
+fn 취소자가_자유수강권을_다_쓰면_남은_금액은_수익자다() {
+    let s = S::new();
+    let ws = s.ws("4월", "2026-04-01", "2026-04-30");
+    let hana = s.student(3, 1, 1, "김하나");
+    let d = s.dept(ws, "로봇과학", vec![fee(강사료, 60_000)]);
+    let e = s.enroll(ws, hana, d);
+    학기제(&s, false);
+    s.policy(Program::FreeVoucher, 30_000, false, "", &[]);
+    s.elig(hana, Program::FreeVoucher);
+
+    취소(&s, e, Some(&[fee(강사료, 50_000)]), "중도 포기");
+    s.generate(ws);
+
+    assert_eq!(s.fund(ws, "FREE_VOUCHER"), 30_000);
+    assert_eq!(s.fund(ws, "SELF_PAY"), 20_000);
+    assert!(s.summary(ws).balanced);
+}
+
+#[test]
+fn 취소자가_두_제도_대상이면_확정된_차감_순서를_따른다() {
+    // 이용권 → 자유수강권 → 수익자. 취소자라고 순서가 달라지지 않는다.
+    let s = S::new();
+    let ws = s.ws("4월", "2026-04-01", "2026-04-30");
+    let hana = s.student(3, 1, 1, "김하나");
+    let d = s.dept(ws, "로봇과학", vec![fee(강사료, 500_000)]);
+    let e = s.enroll(ws, hana, d);
+    학기제(&s, false); // 이용권 1학기 250,000
+    s.policy(Program::FreeVoucher, 100_000, false, "", &[]);
+    s.elig(hana, Program::Voucher);
+    s.elig(hana, Program::FreeVoucher);
+
+    취소(&s, e, Some(&[fee(강사료, 400_000)]), "중도 포기");
+    s.generate(ws);
+
+    assert_eq!(s.fund(ws, "VOUCHER"), 250_000, "이용권을 먼저 쓴다");
+    assert_eq!(s.fund(ws, "FREE_VOUCHER"), 100_000, "다음이 자유수강권");
+    assert_eq!(s.fund(ws, "VOUCHER_OVER"), 50_000, "이용권 대상자라 초과금");
+    assert!(s.summary(ws).balanced);
+}
+
+#[test]
+fn 취소자를_섞어도_배분_합계가_원본과_같다() {
+    // 불변식 — 1원이라도 어긋나면 아무것도 저장하지 않는다.
+    let s = S::new();
+    let ws = s.ws("4월", "2026-04-01", "2026-04-30");
+    let d = s.dept(ws, "로봇과학", 원래_금액());
+    학기제(&s, false);
+    s.policy(Program::FreeVoucher, 40_000, false, "", &[]);
+
+    let a = s.student(3, 1, 1, "수강중일반");
+    let b = s.student(3, 1, 2, "취소일반");
+    let c = s.student(3, 1, 3, "취소이용권");
+    let d4 = s.student(3, 1, 4, "취소자유");
+    let e5 = s.student(3, 1, 5, "취소전액면제");
+    s.elig(c, Program::Voucher);
+    s.elig(d4, Program::FreeVoucher);
+
+    s.enroll(ws, a, d);
+    let eb = s.enroll(ws, b, d);
+    let ec = s.enroll(ws, c, d);
+    let ed = s.enroll(ws, d4, d);
+    let ee = s.enroll(ws, e5, d);
+
+    취소(&s, eb, Some(&중도취소_금액()), "포기");
+    취소(&s, ec, Some(&중도취소_금액()), "포기");
+    취소(&s, ed, Some(&중도취소_금액()), "포기");
+    취소(&s, ee, Some(&전액면제()), "개강 전");
+
+    s.generate(ws);
+    // 수강중 58,000 + 취소 41,500 × 3 = 182,500
+    assert_eq!(총배분(&s, ws), 182_500);
+    assert!(s.summary(ws).balanced, "배분 합계 = 원본 charge 합계");
+}
+
+#[test]
+fn 취소하면_정산이_낡음이_된다() {
+    let s = S::new();
+    let ws = s.ws("4월", "2026-04-01", "2026-04-30");
+    let hana = s.student(3, 1, 1, "김하나");
+    let d = s.dept(ws, "로봇과학", 원래_금액());
+    let e = s.enroll(ws, hana, d);
+    학기제(&s, false);
+    s.generate(ws);
+    assert_eq!(s.status(ws).state, "FRESH");
+
+    취소(&s, e, Some(&중도취소_금액()), "중도 포기");
+    assert_ne!(
+        s.status(ws).state, "FRESH",
+        "취소했으면 재정산 필요가 되어야 한다"
+    );
+}
+
+#[test]
+fn 취소_후_금액을_다시_고칠_수_있다() {
+    let s = S::new();
+    let ws = s.ws("4월", "2026-04-01", "2026-04-30");
+    let hana = s.student(3, 1, 1, "김하나");
+    let d = s.dept(ws, "로봇과학", 원래_금액());
+    let e = s.enroll(ws, hana, d);
+    학기제(&s, false);
+
+    취소(&s, e, Some(&중도취소_금액()), "중도 포기");
+    s.generate(ws);
+
+    // 징수금액을 잘못 넣었다면 다시 고칠 수 있어야 한다
+    s.db.write(|c| {
+        repo::enrollment::update_fees(
+            c,
+            e,
+            &[
+                fee(강사료, 20_000),
+                fee(수용비, 1_500),
+                fee(교재비, 15_000),
+                fee(재료비, 10_000),
+            ],
+            "실제 수강 횟수 정정",
+            &s.items,
+        )
+    })
+    .unwrap();
+    assert_ne!(
+        s.status(ws).state, "FRESH",
+        "금액을 고쳤으면 재정산 필요가 되어야 한다"
+    );
+
+    s.generate(ws);
+    assert_eq!(s.fund(ws, "SELF_PAY"), 46_500);
+    assert!(s.summary(ws).balanced);
+}
+
+#[test]
+fn 취소를_되돌려도_금액은_취소_때_확정한_값이다() {
+    let s = S::new();
+    let ws = s.ws("4월", "2026-04-01", "2026-04-30");
+    let hana = s.student(3, 1, 1, "김하나");
+    let d = s.dept(ws, "로봇과학", 원래_금액());
+    let e = s.enroll(ws, hana, d);
+
+    취소(&s, e, Some(&중도취소_금액()), "중도 포기");
+    s.db.write(|c| repo::enrollment::restore(c, e, false, "착오", &s.items))
+        .unwrap();
+
+    let row = s.db.read(|c| repo::enrollment::get(c, e, &s.items)).unwrap();
+    assert_eq!(row.status, "ACTIVE");
+    assert_eq!(row.total, 41_500, "프로그램이 임의로 되돌리지 않는다");
+}
+
+#[test]
+fn 복원할_때_고르면_부서_기준금액으로_돌아간다() {
+    let s = S::new();
+    let ws = s.ws("4월", "2026-04-01", "2026-04-30");
+    let hana = s.student(3, 1, 1, "김하나");
+    let d = s.dept(ws, "로봇과학", 원래_금액());
+    let e = s.enroll(ws, hana, d);
+
+    취소(&s, e, Some(&중도취소_금액()), "중도 포기");
+    s.db.write(|c| repo::enrollment::restore(c, e, true, "다시 수강", &s.items))
+        .unwrap();
+
+    let row = s.db.read(|c| repo::enrollment::get(c, e, &s.items)).unwrap();
+    assert_eq!(row.total, 58_000);
+    assert!(!row.has_override, "기준금액과 같으므로 수정 표시가 없다");
+}
+
+#[test]
+fn 취소_이력이_한_줄에_이전과_최종_금액을_담는다() {
+    let s = S::new();
+    let ws = s.ws("4월", "2026-04-01", "2026-04-30");
+    let hana = s.student(3, 1, 1, "김하나");
+    let d = s.dept(ws, "로봇과학", 원래_금액());
+    let e = s.enroll(ws, hana, d);
+
+    취소(&s, e, Some(&중도취소_금액()), "5월 중도 포기, 교재·재료 배부 완료");
+
+    let logs = s
+        .db
+        .read(|c| repo::change_log::list(c, s.year, Some(ws), None, Some("ENROLL_CANCEL"), 50))
+        .unwrap();
+    assert_eq!(logs.len(), 1, "한 번의 취소는 한 줄이다");
+    let l = &logs[0];
+    assert!(l.before_value.contains("수강중"), "{}", l.before_value);
+    assert!(l.before_value.contains("58,000"), "{}", l.before_value);
+    assert!(l.after_value.contains("취소"), "{}", l.after_value);
+    assert!(l.after_value.contains("41,500"), "{}", l.after_value);
+    assert!(l.after_value.contains("15,000"), "항목별 금액도 남는다");
+    assert_eq!(l.reason, "5월 중도 포기, 교재·재료 배부 완료");
+}
+
+#[test]
+fn 예전에_취소된_수강은_금액을_확인하라고_알린다() {
+    // 예전 버전에서 취소한 건은 금액이 취소 전 그대로다. 그것이 이제 정산에
+    // 들어가므로 프로그램이 추측하지 않고 사람에게 확인시킨다.
+    let s = S::new();
+    let ws = s.ws("4월", "2026-04-01", "2026-04-30");
+    let hana = s.student(3, 1, 1, "김하나");
+    let d = s.dept(ws, "로봇과학", 원래_금액());
+    let e = s.enroll(ws, hana, d);
+    학기제(&s, false);
+
+    취소(&s, e, None, "전학"); // 금액을 손대지 않은 취소 = 예전 방식
+    let issues = s.db.read(|c| repo::settle::validate(c, ws)).unwrap();
+    assert!(
+        issues.iter().any(|i| i.code == "CANCEL_FULL_AMOUNT"),
+        "{issues:?}"
+    );
+
+    // 금액을 확정하면 안내가 사라진다
+    s.db.write(|c| {
+        repo::enrollment::update_fees(c, e, &중도취소_금액(), "실제 징수금액 확정", &s.items)
+    })
+    .unwrap();
+    let issues = s.db.read(|c| repo::settle::validate(c, ws)).unwrap();
+    assert!(!issues.iter().any(|i| i.code == "CANCEL_FULL_AMOUNT"));
+}
+
+#[test]
+fn 취소자만_있어도_빈_정산이_아니다() {
+    let s = S::new();
+    let ws = s.ws("4월", "2026-04-01", "2026-04-30");
+    let hana = s.student(3, 1, 1, "김하나");
+    let d = s.dept(ws, "로봇과학", 원래_금액());
+    let e = s.enroll(ws, hana, d);
+    학기제(&s, false);
+    취소(&s, e, Some(&중도취소_금액()), "중도 포기");
+
+    let issues = s.db.read(|c| repo::settle::validate(c, ws)).unwrap();
+    assert!(
+        !issues.iter().any(|i| i.code == "NO_ENROLLMENT"),
+        "징수할 금액이 있으므로 빈 정산이 아니다: {issues:?}"
+    );
+}
+
+#[test]
+fn 취소자도_수익자_화면에_나온다() {
+    let s = S::new();
+    let ws = s.ws("4월", "2026-04-01", "2026-04-30");
+    let hana = s.student(3, 1, 1, "김하나");
+    let d = s.dept(ws, "로봇과학", 원래_금액());
+    let e = s.enroll(ws, hana, d);
+    학기제(&s, false);
+    취소(&s, e, Some(&중도취소_금액()), "중도 포기");
+    s.generate(ws);
+
+    let rows = s
+        .db
+        .read(|c| repo::settle::self_pay_rows(c, ws, &s.items))
+        .unwrap();
+    assert_eq!(rows.len(), 1, "취소자도 수익자 화면에 나온다");
+    assert_eq!(rows[0].total, 41_500);
 }

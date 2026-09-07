@@ -31,7 +31,10 @@ pub fn dept_list(conn: &Connection, workspace_id: i64) -> AppResult<Vec<Priority
             .unwrap_or_default(),
     );
 
-    // 이용권 자격이 이 작업공간 기간에 유효한 학생들
+    // 이용권 자격이 이 작업공간 기간에 유효한 학생들.
+    // 정산 대상 기준이라 상태로 걸러지 않는다 — 취소했지만 징수할 금액이 남은
+    // 수강도 차감 순서를 타므로, 그 부서가 목록에 있어야 한다
+    // (repo::settle::SETTLE_TARGET 과 같은 뜻).
     let mut st = conn.prepare(
         "SELECT DISTINCT e.department_id, d.name, d.class_name, s.id, s.grade,
                 el.valid_from, el.valid_to
@@ -40,7 +43,9 @@ pub fn dept_list(conn: &Connection, workspace_id: i64) -> AppResult<Vec<Priority
            JOIN student s    ON s.id = e.student_id
            JOIN support_eligibility el
                   ON el.student_id = s.id AND el.year_id = ?1 AND el.program = 'VOUCHER'
-          WHERE e.workspace_id = ?2 AND e.status = 'ACTIVE'",
+          WHERE e.workspace_id = ?2
+            AND EXISTS (SELECT 1 FROM charge ct
+                         WHERE ct.enrollment_id = e.id AND ct.amount > 0)",
     )?;
     let raw = st
         .query_map(params![year_id, workspace_id], |r| {
