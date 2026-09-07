@@ -132,15 +132,6 @@ export function DashboardPage() {
           ))}
         </ol>
       </Card>
-
-      <Card title="다음 단계">
-        <div className="hint" style={{ lineHeight: 1.9 }}>
-          지원금 설정과 정산 엔진은 <b>Phase 3</b>, 품의자료는 <b>Phase 4</b>에서 만듭니다.
-          <br />
-          지금은 수강 자료를 넣고 금액을 다듬는 단계입니다. 지원금 사용액과 잔액은 정산을
-          실행해야 나오므로, 그 전까지는 화면에 표시하지 않습니다.
-        </div>
-      </Card>
     </div>
   )
 }
