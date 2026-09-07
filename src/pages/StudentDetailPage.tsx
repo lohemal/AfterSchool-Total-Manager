@@ -14,7 +14,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { useMemo, useState } from 'react'
 
-import { Button, Card, Empty, Field, Input, Notice, Select } from '@/components/ui'
+import { Button, Card, Empty, Field, Input, Notice, NumInput, Select } from '@/components/ui'
 import { api } from '@/ipc/api'
 import type { Student } from '@/ipc/types'
 import { compareClassNo, supportLabel, won } from '@/lib/format'
@@ -133,8 +133,7 @@ export function StudentDetailPage() {
             </Select>
           </Field>
           <Field label="번호">
-            <Input
-              className="input--num"
+            <NumInput
               value={studentNo}
               placeholder="예: 5"
               style={{ width: 84 }}

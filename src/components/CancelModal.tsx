@@ -17,7 +17,7 @@ import { useState } from 'react'
 
 import { Modal } from '@/components/Modal'
 import { useToast } from '@/components/Toast'
-import { Button, Field, Input } from '@/components/ui'
+import { Button, Field, Input, NumInput } from '@/components/ui'
 import { api, errorMessage } from '@/ipc/api'
 import type { CostItem, Enrollment, Fee } from '@/ipc/types'
 import { won } from '@/lib/format'
@@ -108,8 +108,7 @@ export function CancelModal({
                 <td>{it.name}</td>
                 <td className="num">{won(before(it.code))}</td>
                 <td className="num">
-                  <Input
-                    className="input--num"
+                  <NumInput
                     style={{ width: 120, textAlign: 'right' }}
                     value={draft[it.code] === 0 ? '' : won(draft[it.code] ?? 0)}
                     placeholder="0"

@@ -12,7 +12,7 @@ import { cmp, DataTable, type Column } from '@/components/DataTable'
 import { ExcelTools } from '@/components/ExcelTools'
 import { Confirm, Modal } from '@/components/Modal'
 import { useToast } from '@/components/Toast'
-import { Button, Card, Field, Input, Notice, Search, Select } from '@/components/ui'
+import { Button, Card, Field, Input, Notice, NumInput, Search, Select } from '@/components/ui'
 import { api, errorMessage } from '@/ipc/api'
 import type { Student, StudentFilter, StudentInput } from '@/ipc/types'
 import { compareClassNo, supportLabel } from '@/lib/format'
@@ -332,8 +332,7 @@ function StudentModal({
     >
       <div className="grid3">
         <Field label="학년">
-          <Input
-            className="input--num"
+          <NumInput
             value={form.grade || ''}
             onChange={(e) => setForm({ ...form, grade: num(e.target.value) })}
           />
@@ -347,8 +346,7 @@ function StudentModal({
           />
         </Field>
         <Field label="번호">
-          <Input
-            className="input--num"
+          <NumInput
             value={form.studentNo || ''}
             onChange={(e) => setForm({ ...form, studentNo: num(e.target.value) })}
           />
