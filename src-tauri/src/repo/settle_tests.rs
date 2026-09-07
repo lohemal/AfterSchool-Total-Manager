@@ -1148,3 +1148,63 @@ fn 정산_결과도_반_차례대로_나온다() {
     let 반: Vec<&str> = rows.iter().map(|r| r.class_no.as_str()).collect();
     assert_eq!(반, vec!["1", "2", "10", "가", "나"]);
 }
+
+#[test]
+fn 수익자_이용권_자유수강권_Excel에_한글_반이_그대로_나온다() {
+    // 품의는 부서별 집계라 반을 쓰지 않는다. 그러나 이 셋은 학생의 반을 찍는다.
+    use crate::excel::read;
+    use std::path::PathBuf;
+
+    let s = S::new();
+    let ws = s.ws("4월", "2026-04-01", "2026-04-30");
+    let hana = s.student(3, "해", 1, "김하나");
+    let d = s.dept(ws, "로봇과학", vec![fee(강사료, 600_000)]);
+    s.enroll(ws, hana, d);
+    학기제(&s, false);
+    s.elig(hana, Program::Voucher);
+    s.elig(hana, Program::FreeVoucher);
+    s.generate(ws);
+
+    let dir = std::env::temp_dir().join("afterschool-admin-class");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let scope = ["2026학년도", "4월"];
+
+    // 수익자
+    let rows = s
+        .db
+        .read(|c| repo::settle::self_pay_rows(c, ws, &s.items))
+        .unwrap();
+    assert!(!rows.is_empty(), "한도를 넘겨 수익자 부담이 남아야 한다");
+    let made =
+        crate::excel::admin::write_self_pay(&rows, &s.items, &scope, &dir).unwrap();
+    반_확인(&made.path, "해");
+
+    // 방과후 이용권 · 자유수강권
+    for program in [Program::Voucher, Program::FreeVoucher] {
+        let rows = s
+            .db
+            .read(|c| repo::settle::program_rows(c, ws, program, &s.items))
+            .unwrap();
+        assert!(!rows.is_empty(), "{:?} 결과가 비었다", program);
+        let made =
+            crate::excel::admin::write_program(
+                &rows,
+                &s.items,
+                program.label(),
+                program == Program::Voucher,
+                &scope,
+                &dir,
+            )
+            .unwrap();
+        반_확인(&made.path, "해");
+    }
+
+    fn 반_확인(path: &str, 기대: &str) {
+        let sheet = read::read_first_sheet(&PathBuf::from(path)).unwrap();
+        let c = sheet.require("반").unwrap();
+        for (_, cells) in &sheet.rows {
+            assert_eq!(sheet.cell(cells, Some(c)), 기대, "{path}");
+        }
+    }
+}
