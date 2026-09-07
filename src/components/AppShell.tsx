@@ -43,7 +43,10 @@ const NAV: { group: string | null; items: Item[] }[] = [
   },
   {
     group: '행정자료',
-    items: [{ to: '/proposal', label: '품의 양식 받기' }],
+    items: [
+      { to: '/proposal', label: '품의 양식 받기' },
+      { to: '/fee-report', label: '학생별 징수 내역' },
+    ],
   },
   {
     group: '시스템',

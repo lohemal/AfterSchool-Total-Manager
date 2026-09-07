@@ -211,3 +211,41 @@ pub fn enrollment_delete_all(
         backup,
     })
 }
+
+/// 학생별 징수 내역 (행정자료, v0.1.3).
+///
+/// **정산 결과가 아니다.** 학생에게 발생한 최종 수강료(`charge`)를 그대로 보여
+/// 준다. 그래서 정산이 없거나 낡아도 조회된다 — 정산 전에 금액을 대조하는
+/// 자료이기 때문이다.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FeeReport {
+    pub rows: Vec<Enrollment>,
+    /// 중복을 뺀 실제 학생 수
+    pub students: i64,
+    /// 수강 건수 (행 수)
+    pub enrollments: i64,
+    pub total: i64,
+}
+
+#[tauri::command]
+pub fn fee_report(
+    db: State<'_, Db>,
+    workspace_id: i64,
+    filter: EnrollmentFilter,
+) -> AppResult<FeeReport> {
+    db.read(|c| {
+        let items = repo::cost_items(c)?;
+        let rows = repo::enrollment::list_by_student(c, workspace_id, &items, &filter)?;
+        let mut seen = std::collections::HashSet::new();
+        for r in &rows {
+            seen.insert(r.student_id);
+        }
+        Ok(FeeReport {
+            students: seen.len() as i64,
+            enrollments: rows.len() as i64,
+            total: rows.iter().map(|r| r.total).sum(),
+            rows,
+        })
+    })
+}

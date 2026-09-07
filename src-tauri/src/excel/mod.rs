@@ -859,3 +859,146 @@ mod roundtrip_tests;
 #[cfg(test)]
 #[path = "class_no_tests.rs"]
 mod class_no_tests;
+
+/// 학생별 징수 내역 (행정자료, v0.1.3).
+///
+/// **정산 결과가 아니다.** 학생에게 발생한 최종 수강료(`charge`)를 그대로 쓴다.
+/// 지원금이 어느 재원에서 나가는지는 수익자·이용권·자유수강권 화면에서 본다.
+///
+/// ## 화면 필터를 그대로 반영한다
+///
+/// 행정자료 가운데 수익자·이용권·자유수강권·품의는 필터를 무시하고 전체를 낸다 —
+/// 학교 밖으로 나가는 문서라 일부만 담긴 파일이 만들어지면 안 되기 때문이다.
+/// 이 자료는 다르다. 담당자가 "2학년만 뽑아 담임에게 확인" 하는 식으로 쓰므로
+/// **필터를 그대로 반영한다.** 대신 전체 자료로 오해하지 않게 **파일 이름과 시트
+/// 첫 줄에 적용된 조건을 적는다.**
+///
+/// 정산 최신을 요구하지 않는다 — 정산 전에 금액을 대조하는 자료이기 때문이다.
+pub fn export_fee_report(
+    conn: &Connection,
+    workspace_id: i64,
+    items: &[CostItem],
+    filter: &crate::model::EnrollmentFilter,
+    scope: &[&str],
+    cond: &str,
+    dir: &Path,
+) -> AppResult<ExportResult> {
+    let list = repo::enrollment::list_by_student(conn, workspace_id, items, filter)?;
+
+    let mut headers: Vec<String> = vec![
+        "학년".into(),
+        "반".into(),
+        "번호".into(),
+        "이름".into(),
+        "지원유형".into(),
+        "부서".into(),
+    ];
+    headers.extend(items.iter().map(|i| i.name.clone()));
+    headers.push("합계".into());
+    headers.push("수강상태".into());
+    let head: Vec<&str> = headers.iter().map(|s| s.as_str()).collect();
+
+    let money_from = 6;
+    let money_cols: Vec<usize> = (money_from..money_from + items.len() + 1).collect();
+
+    let rows: Vec<Vec<String>> = list
+        .iter()
+        .map(|e| {
+            let mut row = vec![
+                e.grade.to_string(),
+                e.class_no.clone(),
+                e.student_no.to_string(),
+                e.name.clone(),
+                program_label(&e.programs),
+                e.dept_label.clone(),
+            ];
+            for it in items {
+                let amount = e
+                    .fees
+                    .iter()
+                    .find(|f| f.item_code == it.code)
+                    .map(|f| f.amount)
+                    .unwrap_or(0);
+                row.push(amount.to_string());
+            }
+            row.push(e.total.to_string());
+            row.push(status_label(&e.status));
+            row
+        })
+        .collect();
+
+    let n = rows.len();
+
+    // 맨 아래에 합계 줄을 붙인다. 조건을 시트 **맨 위**에 얹으면 헤더가 한 줄
+    // 밀려서, 이 파일을 다시 읽는 도구가 열을 못 찾는다. 그래서 아래에 둔다.
+    let mut rows = rows;
+    if n > 0 {
+        let mut foot = vec![
+            "합계".to_string(),
+            String::new(),
+            String::new(),
+            format!("학생 {}명", students_of(&list)),
+            format!("수강 {n}건"),
+            if cond.trim().is_empty() {
+                "조건 없음(전체)".to_string()
+            } else {
+                cond.trim().to_string()
+            },
+        ];
+        for it in items {
+            foot.push(
+                list.iter()
+                    .map(|e| {
+                        e.fees
+                            .iter()
+                            .find(|f| f.item_code == it.code)
+                            .map(|f| f.amount)
+                            .unwrap_or(0)
+                    })
+                    .sum::<i64>()
+                    .to_string(),
+            );
+        }
+        foot.push(list.iter().map(|e| e.total).sum::<i64>().to_string());
+        foot.push(String::new());
+        rows.push(foot);
+    }
+
+    // 조건을 파일 이름에도 넣는다 — 파일만 보고도 전체가 아닌 것을 알아야 한다.
+    let mut name_scope: Vec<&str> = scope.to_vec();
+    if !cond.trim().is_empty() {
+        name_scope.push(cond);
+    }
+    let path = write::export_path(dir, "학생별징수내역", &name_scope)?;
+    let widths = vec![
+        write::DEFAULT_WIDTH; head.len()
+    ];
+    write::write_sheet_sized(
+        &path,
+        "학생별징수내역",
+        &head,
+        &rows,
+        &money_cols,
+        None,
+        &widths,
+        true, // 마지막 줄을 합계로 강조
+    )?;
+    Ok(done(path, n))
+}
+
+/// 중복을 뺀 학생 수.
+fn students_of(list: &[crate::model::Enrollment]) -> usize {
+    let mut seen = std::collections::HashSet::new();
+    for e in list {
+        seen.insert(e.student_id);
+    }
+    seen.len()
+}
+
+pub(crate) fn status_label(status: &str) -> String {
+    if status == "ACTIVE" {
+        "수강중".into()
+    } else {
+        "수강취소".into()
+    }
+}

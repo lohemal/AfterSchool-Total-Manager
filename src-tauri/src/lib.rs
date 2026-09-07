@@ -114,6 +114,7 @@ pub fn run() {
             commands::enrollment::change_log_list,
             commands::enrollment::student_detail,
             commands::enrollment::enrollment_delete_all,
+            commands::enrollment::fee_report,
             commands::policy::policy_list,
             commands::policy::policy_save,
             commands::settle::settlement_status,
@@ -140,6 +141,7 @@ pub fn run() {
             commands::excel::excel_commit,
             commands::excel::excel_export,
             commands::excel::excel_export_issues,
+            commands::excel::fee_report_export,
         ])
         .run(tauri::generate_context!())
         .expect("앱을 시작하지 못했습니다");

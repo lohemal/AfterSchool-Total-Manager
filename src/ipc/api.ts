@@ -23,6 +23,7 @@ import type {
   EnrollmentFilter,
   EnrollmentInput,
   ExportResult,
+  FeeReport,
   Fee,
   FeeDiffView,
   FeePick,
@@ -276,6 +277,13 @@ export const api = {
       workspaceId: args.workspaceId ?? null,
       program: args.program ?? null,
     }),
+  /** 학생별 징수 내역 — charge 기준. 정산과 무관하게 조회된다. */
+  feeReport: (workspaceId: number, filter: EnrollmentFilter) =>
+    invoke<FeeReport>('fee_report', { workspaceId, filter }),
+  /** 화면 필터를 그대로 반영해 내려받는다. `cond`는 파일에 적히는 조건 문구. */
+  feeReportExport: (workspaceId: number, filter: EnrollmentFilter, cond: string) =>
+    invoke<ExportResult>('fee_report_export', { workspaceId, filter, cond }),
+
   excelCommit: (token: string, yearId: number, workspaceId?: number | null) =>
     invoke<ImportResult>('excel_commit', { token, yearId, workspaceId: workspaceId ?? null }),
   excelExport: (args: {

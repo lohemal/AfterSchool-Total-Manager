@@ -69,3 +69,6 @@ mod proposal_tests;
 
 #[cfg(test)]
 mod class_no_tests;
+
+#[cfg(test)]
+mod fee_report_tests;

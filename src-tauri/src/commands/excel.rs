@@ -138,3 +138,25 @@ pub fn excel_export_issues(
 ) -> AppResult<ExportResult> {
     excel::export_issues(&issues, &headers, &db.export_dir())
 }
+
+/// 학생별 징수 내역 내려받기 (행정자료, v0.1.3).
+///
+/// **화면 필터를 그대로 반영한다.** `cond`는 화면이 만들어 보내는 사람이 읽을
+/// 조건 문구(예: `2학년·가람반`)로, 파일 이름과 시트 첫 줄에 들어간다.
+/// 정산 최신을 요구하지 않는다 — 정산 전에 금액을 대조하는 자료이기 때문이다.
+#[tauri::command]
+pub fn fee_report_export(
+    db: State<'_, Db>,
+    workspace_id: i64,
+    filter: crate::model::EnrollmentFilter,
+    cond: String,
+) -> AppResult<excel::ExportResult> {
+    let dir = db.export_dir();
+    db.read(|c| {
+        let items = repo::cost_items(c)?;
+        let ws = repo::year::get_workspace(c, workspace_id)?;
+        let year = repo::year::get_year(c, ws.year_id)?;
+        let scope = [year.name.as_str(), ws.name.as_str()];
+        excel::export_fee_report(c, workspace_id, &items, &filter, &scope, &cond, &dir)
+    })
+}

@@ -543,3 +543,16 @@ export interface BulkDeleteResult {
   deleted: number
   backup: string
 }
+
+/**
+ * 학생별 징수 내역 (행정자료, v0.1.3).
+ *
+ * **정산 결과가 아니다.** 학생에게 발생한 최종 수강료(`charge`) 기준이다.
+ * `students`는 중복을 뺀 실제 학생 수이고 `enrollments`는 행 수다.
+ */
+export interface FeeReport {
+  rows: Enrollment[]
+  students: number
+  enrollments: number
+  total: number
+}

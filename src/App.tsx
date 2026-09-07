@@ -14,6 +14,7 @@ import { DepartmentsPage } from '@/pages/DepartmentsPage'
 import { EligibilityPage } from '@/pages/EligibilityPage'
 import { PolicyPage } from '@/pages/PolicyPage'
 import { FreeVoucherPage, VoucherPage } from '@/pages/ProgramResultPage'
+import { FeeReportPage } from '@/pages/FeeReportPage'
 import { ProposalPage } from '@/pages/ProposalPage'
 import { RosterPage } from '@/pages/RosterPage'
 import { SelfPayPage } from '@/pages/SelfPayPage'
@@ -90,6 +91,7 @@ function Shell({ onYearCreated }: { onYearCreated: () => void }) {
           <Route path="free-voucher" element={<Guard>{<FreeVoucherPage />}</Guard>} />
           <Route path="policy" element={<Guard>{<PolicyPage />}</Guard>} />
           <Route path="proposal" element={<Guard>{<ProposalPage />}</Guard>} />
+          <Route path="fee-report" element={<Guard>{<FeeReportPage />}</Guard>} />
           <Route path="system" element={<Guard>{<SystemPage />}</Guard>} />
         </Route>
       </Routes>

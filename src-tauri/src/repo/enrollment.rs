@@ -109,7 +109,12 @@ FROM enrollment e
 JOIN student s    ON s.id = e.student_id
 JOIN department d ON d.id = e.department_id";
 
-const RAW_ORDER: &str = " ORDER BY d.name, d.class_name, s.grade, s.class_sort, s.class_no, s.student_no";
+const RAW_ORDER: &str =
+    " ORDER BY d.name, d.class_name, s.grade, s.class_sort, s.class_no, s.student_no";
+
+/// 학생 우선 차례 — 학생별 징수 내역이 쓴다.
+const STUDENT_ORDER: &str = " ORDER BY s.grade, s.class_sort, s.class_no, s.student_no,
+                              s.name, d.name, d.class_name";
 
 fn map_raw(r: &rusqlite::Row) -> rusqlite::Result<Raw> {
     Ok(Raw {
@@ -319,6 +324,30 @@ pub fn list(
     items: &[CostItem],
     f: &EnrollmentFilter,
 ) -> AppResult<Vec<Enrollment>> {
+    list_ordered(conn, workspace_id, items, f, RAW_ORDER)
+}
+
+/// 학생별 징수 내역용 — **학생 우선** 차례.
+///
+/// 수강생 명단은 부서 우선이다(부서별로 일하니까). 이 자료는 학생을 확인하는
+/// 자료이므로 `학년 → 반 자연정렬 → 번호 → 이름 → 부서` 로 놓는다.
+/// 걸러 내는 규칙은 명단과 똑같이 쓴다 — 두 곳이 달라지면 안 된다.
+pub fn list_by_student(
+    conn: &Connection,
+    workspace_id: i64,
+    items: &[CostItem],
+    f: &EnrollmentFilter,
+) -> AppResult<Vec<Enrollment>> {
+    list_ordered(conn, workspace_id, items, f, STUDENT_ORDER)
+}
+
+fn list_ordered(
+    conn: &Connection,
+    workspace_id: i64,
+    items: &[CostItem],
+    f: &EnrollmentFilter,
+    order: &str,
+) -> AppResult<Vec<Enrollment>> {
     let year_id = year_of_workspace(conn, workspace_id)?;
 
     let mut sql = format!("{RAW_SELECT} WHERE e.workspace_id = ?1");
@@ -347,7 +376,7 @@ pub fn list(
             " AND (s.name LIKE ?{i} OR d.name LIKE ?{i} OR d.class_name LIKE ?{i})"
         ));
     }
-    sql.push_str(RAW_ORDER);
+    sql.push_str(order);
 
     let mut st = conn.prepare(&sql)?;
     let refs: Vec<&dyn ToSql> = args.iter().map(|b| b.as_ref()).collect();

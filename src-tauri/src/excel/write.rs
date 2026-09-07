@@ -103,6 +103,7 @@ pub fn write_sheet_sized(
     widths: &[f64],
     bold_last_row: bool,
 ) -> AppResult<PathBuf> {
+
     let mut book = Workbook::new();
     let sheet = book.add_worksheet();
     sheet.set_name(sheet_name)?;
