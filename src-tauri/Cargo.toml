@@ -1,6 +1,6 @@
 [package]
 name = "afterschool"
-version = "0.1.3"
+version = "0.1.4"
 description = "방과후 통합 매니저"
 authors = ["lohemal"]
 edition = "2021"
