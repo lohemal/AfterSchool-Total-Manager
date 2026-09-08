@@ -57,7 +57,15 @@ fn normalize(s: &str) -> String {
     out
 }
 
+/// 업로드는 언제나 **첫 장**만 읽는다 — 사용자가 다른 장에 자료를 두면
+/// 조용히 반영되는 것보다 "비어 있습니다"가 낫다.
 pub fn read_first_sheet(path: &Path) -> AppResult<Sheet> {
+    read_sheet_at(path, 0)
+}
+
+/// 몇 번째 장을 읽는다(0부터). 학생별 합계·부서별 상세처럼 여러 장인 파일을
+/// 대조할 때 쓴다.
+pub fn read_sheet_at(path: &Path, idx: usize) -> AppResult<Sheet> {
     let mut wb = open_workbook_auto(path).map_err(|e| {
         AppError::new("EXCEL_READ", "Excel 파일을 열지 못했습니다. 파일이 열려 있지 않은지 확인해 주세요.")
             .detail(e.to_string())
@@ -65,7 +73,7 @@ pub fn read_first_sheet(path: &Path) -> AppResult<Sheet> {
 
     let name = wb
         .sheet_names()
-        .first()
+        .get(idx)
         .cloned()
         .ok_or_else(|| AppError::invalid("Excel 파일에 시트가 없습니다."))?;
 

@@ -106,8 +106,74 @@ pub fn write_sheet_sized(
 
     let mut book = Workbook::new();
     let sheet = book.add_worksheet();
-    sheet.set_name(sheet_name)?;
     let s = styles();
+    fill_sheet(
+        sheet,
+        &s,
+        sheet_name,
+        headers,
+        rows,
+        money_cols,
+        sample,
+        widths,
+        bold_last_row,
+    )?;
+    book.save(path)?;
+    Ok(path.to_path_buf())
+}
+
+/// 여러 장으로 된 파일의 한 장.
+///
+/// 학생별 합계와 부서별 상세처럼 **같은 돈을 두 가지 굵기로** 보여 줄 때
+/// 파일을 둘로 나누면 대조가 번거롭다. 그래서 한 파일에 시트로 담는다.
+pub struct SheetSpec<'a> {
+    pub name: &'a str,
+    pub headers: Vec<String>,
+    pub rows: Vec<Vec<String>>,
+    pub money_cols: Vec<usize>,
+    pub widths: Vec<f64>,
+    /// 마지막 줄을 합계 행으로 강조할지
+    pub bold_last_row: bool,
+}
+
+/// 여러 장을 한 파일에 쓴다. 차례는 준 그대로다 — 첫 장이 대표 장이다.
+pub fn write_book(path: &Path, sheets: &[SheetSpec]) -> AppResult<PathBuf> {
+    let mut book = Workbook::new();
+    let s = styles();
+    for spec in sheets {
+        let sheet = book.add_worksheet();
+        let head: Vec<&str> = spec.headers.iter().map(|h| h.as_str()).collect();
+        fill_sheet(
+            sheet,
+            &s,
+            spec.name,
+            &head,
+            &spec.rows,
+            &spec.money_cols,
+            None,
+            &spec.widths,
+            spec.bold_last_row,
+        )?;
+    }
+    book.save(path)?;
+    Ok(path.to_path_buf())
+}
+
+/// 한 장을 채운다. `write_sheet_sized`와 `write_book`이 같은 몸통을 쓴다 —
+/// 서식이 시트마다 달라지면 같은 파일 안에서 보기가 어긋난다.
+#[allow(clippy::too_many_arguments)]
+fn fill_sheet(
+    sheet: &mut Worksheet,
+    s: &Styles,
+    sheet_name: &str,
+    headers: &[&str],
+    rows: &[Vec<String>],
+    money_cols: &[usize],
+    sample: Option<&[&str]>,
+    widths: &[f64],
+    bold_last_row: bool,
+) -> AppResult<()> {
+    sheet.set_name(sheet_name)?;
 
     for (c, h) in headers.iter().enumerate() {
         sheet.write_string_with_format(0, c as u16, *h, &s.header)?;
@@ -141,8 +207,7 @@ pub fn write_sheet_sized(
     }
 
     freeze_header(sheet)?;
-    book.save(path)?;
-    Ok(path.to_path_buf())
+    Ok(())
 }
 
 fn freeze_header(sheet: &mut Worksheet) -> AppResult<()> {

@@ -6,6 +6,7 @@
 pub mod change_log;
 pub mod department;
 pub mod eligibility;
+pub mod fee_report;
 pub mod enrollment;
 pub mod policy;
 pub mod proposal;

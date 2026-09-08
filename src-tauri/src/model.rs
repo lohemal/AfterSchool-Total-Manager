@@ -584,3 +584,75 @@ pub struct StudentAllocRow {
     pub origin_label: String,
     pub amount: i64,
 }
+
+// ─────────────────────────────────────────────── 학생 단위 집계 (v0.1.4)
+//
+// 네 화면(학생별 징수 내역 · 수익자 · 방과후 이용권 · 자유수강권)이 같은 모양을
+// 쓴다 — **목록에서 학생이 얼마인지 보고, 눌러서 왜 그 금액인지 본다.**
+//
+// 다만 **어디서 나온 돈인지는 화면마다 다르다.** 하나의 SQL로 억지로 합치지
+// 않는 까닭이다.
+//
+//   학생별 징수 내역 → 원본 `charge` 전체
+//   수익자          → 정산 배분 중 학부모 부담(SELF_PAY + VOUCHER_OVER)
+//   방과후 이용권    → 정산 배분 중 이용권
+//   자유수강권      → 정산 배분 중 자유수강권
+
+/// 학생 한 명의 항목별 합계 — 목록 한 줄.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StudentSumRow {
+    pub student_id: i64,
+    pub grade: i64,
+    pub class_no: String,
+    pub student_no: i64,
+    pub name: String,
+    /// 이 작업공간 기간에 유효한 지원제도
+    pub programs: Vec<String>,
+    /// 항목별 합계 — 이 학생이 수강하는 모든 부서를 더한 값
+    pub fees: Vec<Fee>,
+    pub total: i64,
+    /// 이 학생의 상세 줄 수. 누르면 이만큼 나온다
+    pub details: i64,
+}
+
+/// 학생별 징수 내역 (행정자료).
+///
+/// **정산 결과가 아니다.** 학생에게 발생한 최종 수강료(`charge`) 기준이므로
+/// 정산이 없거나 낡아도 조회된다 — 정산 전에 금액을 대조하는 자료다.
+///
+/// 필터는 **학생을 찾는 조건**이고, 금액은 언제나 찾은 학생의 **전체** 합계다.
+/// `2학년`으로 걸러도 그 학생의 모든 부서가 더해진다. 그래서 `details`에는
+/// 걸러진 부서만이 아니라 찾은 학생의 모든 수강 건이 들어간다 —
+/// 그러지 않으면 목록 합계와 상세 합계가 어긋난다.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FeeReport {
+    /// 학생당 한 줄
+    pub rows: Vec<StudentSumRow>,
+    /// 부서별 상세 — 학생을 눌렀을 때와 Excel 둘째 장에 쓴다
+    pub details: Vec<Enrollment>,
+    /// 학생 수 (= `rows.len()`)
+    pub students: i64,
+    /// 수강 건수 (= `details.len()`)
+    pub enrollments: i64,
+    /// 항목별 총합 — 화면 요약과 Excel 합계 줄이 이 값을 그대로 쓴다
+    pub fees: Vec<Fee>,
+    pub total: i64,
+}
+
+/// 수익자 탭 (정산 결과). 목록은 학생별 합계, 상세는 부서별이다.
+///
+/// **원본 `charge`가 아니라 정산 스냅샷의 배분액이다.** 이용권으로 정상
+/// 지원된 금액은 여기 들어오지 않는다.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SelfPayReport {
+    /// 학생당 한 줄
+    pub rows: Vec<StudentSumRow>,
+    /// 학생 × 부서 상세 — 지금까지 쓰던 줄 그대로다
+    pub details: Vec<SelfPayRow>,
+    /// 항목별 총합
+    pub fees: Vec<Fee>,
+    pub total: i64,
+}

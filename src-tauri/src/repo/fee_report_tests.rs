@@ -4,7 +4,6 @@
 //! **정산 결과가 아니다.** `Enrollment + Charge` 만 본다. 그래서 정산이 없거나
 //! 낡아도 조회된다 — 정산 **전에** 금액을 대조하는 자료이기 때문이다.
 
-use std::collections::HashSet;
 use std::path::PathBuf;
 
 use crate::excel::read;
@@ -151,14 +150,26 @@ impl F {
             .unwrap()
     }
 
-    /// 명령 계층과 같은 셈 — 중복을 뺀 학생 수 · 건수 · 총액.
+    /// 집계 서비스 — 화면과 Excel 이 함께 쓰는 결과 그대로.
+    fn 보고서(&self, f: &EnrollmentFilter) -> crate::model::FeeReport {
+        self.db
+            .read(|c| repo::fee_report::build(c, self.ws, &self.items, f))
+            .unwrap()
+    }
+
+    /// 학생 수 · 수강 건수 · 총액.
     fn 요약(&self, f: &EnrollmentFilter) -> (usize, usize, i64) {
-        let rows = self.내역(f);
-        let mut seen = HashSet::new();
-        for r in &rows {
-            seen.insert(r.student_id);
-        }
-        (seen.len(), rows.len(), rows.iter().map(|r| r.total).sum())
+        let r = self.보고서(f);
+        (r.students as usize, r.enrollments as usize, r.total)
+    }
+
+    /// 한 학생 줄의 항목 금액.
+    fn 금액(row: &crate::model::StudentSumRow, code: &str) -> i64 {
+        row.fees
+            .iter()
+            .find(|x| x.item_code == code)
+            .map(|x| x.amount)
+            .unwrap_or(0)
     }
 }
 
@@ -479,13 +490,222 @@ fn 한글_반이_그대로_나온다() {
     assert_eq!(반, vec!["가람", "나리", "다솜"]);
 }
 
-// ─────────────────────────────────── 학생별 징수 내역 Excel (v0.1.3)
+// ─────────────────────────────────── 학생 단위 집계 (v0.1.4)
+//
+// 이 메뉴의 목적은 **한 학생에게 모두 얼마를 징수하는가**다. 그래서 목록은
+// 학생당 한 줄이고, 금액은 그 학생이 듣는 모든 부서를 항목별로 더한 값이다.
 
-/// 맨 아래 합계 줄을 뺀 자료 줄만 남긴다.
-fn 자료만(mut sheet: read::Sheet) -> read::Sheet {
-    sheet.rows.pop();
-    sheet
+#[test]
+fn 여러_부서를_들으면_항목별로_더해_한_줄이_된다() {
+    let f = F::new();
+    let hana = f.student(1, "가람", 1, "홍길동");
+    let 로봇 = f.dept("로봇과학", "A", vec![fee(강사료, 30_000), fee(재료비, 5_000)]);
+    let 미술 = f.dept("미술", "A", vec![fee(강사료, 20_000), fee(교재비, 2_000)]);
+    let 축구 = f.dept("축구", "A", vec![fee(강사료, 25_000)]);
+    f.enroll(hana, 로봇);
+    f.enroll(hana, 미술);
+    f.enroll(hana, 축구);
+
+    let r = f.보고서(&EnrollmentFilter::default());
+    assert_eq!(r.rows.len(), 1, "학생 한 명이므로 한 줄");
+    let row = &r.rows[0];
+    assert_eq!(row.details, 3, "부서 세 곳");
+    assert_eq!(F::금액(row, 강사료), 75_000, "30,000 + 20,000 + 25,000");
+    assert_eq!(F::금액(row, 재료비), 5_000);
+    assert_eq!(F::금액(row, 교재비), 2_000);
+    assert_eq!(F::금액(row, 수용비), 0);
+    assert_eq!(row.total, 82_000, "네 항목 합계");
 }
+
+#[test]
+fn 학생_줄_합계는_항목_합계의_합이다() {
+    let f = F::new();
+    let a = f.student(1, "가람", 1, "김하나");
+    let d = f.dept("로봇과학", "A", 원래_금액());
+    f.enroll(a, d);
+
+    for row in &f.보고서(&EnrollmentFilter::default()).rows {
+        assert_eq!(row.fees.iter().map(|x| x.amount).sum::<i64>(), row.total);
+    }
+}
+
+#[test]
+fn 목록_합계와_상세_합계가_같다() {
+    let f = F::new();
+    let a = f.student(1, "가람", 1, "김하나");
+    let b = f.student(2, "나리", 1, "이두리");
+    let d1 = f.dept("로봇과학", "A", 원래_금액());
+    let d2 = f.dept("미술", "A", vec![fee(강사료, 20_000)]);
+    f.enroll(a, d1);
+    f.enroll(a, d2);
+    let eb = f.enroll(b, d1);
+    f.취소(eb, Some(&중도취소_금액()), "중도 포기");
+
+    let r = f.보고서(&EnrollmentFilter::default());
+    // 목록 총액 = 상세 총액 = 항목별 총합의 합
+    let 목록: i64 = r.rows.iter().map(|x| x.total).sum();
+    let 상세: i64 = r.details.iter().map(|x| x.total).sum();
+    assert_eq!(목록, 상세, "목록과 상세가 어긋난다");
+    assert_eq!(r.total, 목록);
+    assert_eq!(r.fees.iter().map(|x| x.amount).sum::<i64>(), r.total);
+
+    // 학생마다도 맞는가
+    for row in &r.rows {
+        let 그_학생: i64 = r
+            .details
+            .iter()
+            .filter(|e| e.student_id == row.student_id)
+            .map(|e| e.total)
+            .sum();
+        assert_eq!(row.total, 그_학생, "{} 학생", row.name);
+    }
+}
+
+#[test]
+fn 취소자도_확정_금액으로_합산된다() {
+    let f = F::new();
+    let a = f.student(1, "가람", 1, "김하나");
+    let 로봇 = f.dept("로봇과학", "A", 원래_금액());
+    let 미술 = f.dept("미술", "A", vec![fee(강사료, 20_000)]);
+    f.enroll(a, 로봇);
+    let e2 = f.enroll(a, 미술);
+    f.취소(e2, Some(&[fee(강사료, 8_000)]), "중도 포기");
+
+    let r = f.보고서(&EnrollmentFilter::default());
+    let row = &r.rows[0];
+    assert_eq!(row.details, 2, "취소한 수강도 상세에 남는다");
+    assert_eq!(F::금액(row, 강사료), 38_000, "30,000 + 취소 확정 8,000");
+    // 로봇과학 58,000 + 미술 취소 확정 8,000
+    assert_eq!(row.total, 66_000);
+}
+
+#[test]
+fn 전액_면제로_취소하면_0원으로_들어온다() {
+    let f = F::new();
+    let a = f.student(1, "가람", 1, "김하나");
+    let d = f.dept("로봇과학", "A", 원래_금액());
+    let e = f.enroll(a, d);
+    f.취소(e, Some(&전액면제()), "개강 전 취소");
+
+    let r = f.보고서(&EnrollmentFilter::default());
+    assert_eq!(r.rows.len(), 1, "0원이어도 학생은 나온다");
+    assert_eq!(r.rows[0].total, 0);
+    assert_eq!(r.total, 0);
+}
+
+#[test]
+fn 부서_필터는_학생을_찾고_금액은_전체다() {
+    let f = F::new();
+    let 듣는이 = f.student(1, "가람", 1, "김하나");
+    let 안듣는이 = f.student(1, "가람", 2, "이두리");
+    let 로봇 = f.dept("로봇과학", "A", vec![fee(강사료, 30_000)]);
+    let 미술 = f.dept("미술", "A", vec![fee(강사료, 20_000)]);
+    f.enroll(듣는이, 로봇);
+    f.enroll(듣는이, 미술);
+    f.enroll(안듣는이, 미술);
+
+    let r = f.보고서(&EnrollmentFilter {
+        department_id: Some(로봇),
+        ..Default::default()
+    });
+    assert_eq!(r.rows.len(), 1, "로봇과학을 듣는 학생만");
+    assert_eq!(r.rows[0].name, "김하나");
+    // 로봇과학으로 찾았지만 금액은 미술까지 더한 전체다
+    assert_eq!(r.rows[0].total, 50_000, "30,000 + 20,000");
+    assert_eq!(r.rows[0].details, 2, "상세에는 미술도 있다");
+    assert_eq!(r.enrollments, 2);
+}
+
+#[test]
+fn 수강상태_필터도_학생을_찾는_조건이다() {
+    let f = F::new();
+    let a = f.student(1, "가람", 1, "김하나");
+    let b = f.student(1, "가람", 2, "이두리");
+    let 로봇 = f.dept("로봇과학", "A", vec![fee(강사료, 30_000)]);
+    let 미술 = f.dept("미술", "A", vec![fee(강사료, 20_000)]);
+    f.enroll(a, 로봇);
+    let e = f.enroll(a, 미술);
+    f.취소(e, Some(&[fee(강사료, 5_000)]), "중도 포기");
+    f.enroll(b, 로봇);
+
+    let r = f.보고서(&EnrollmentFilter {
+        status: Some("CANCELLED".into()),
+        ..Default::default()
+    });
+    assert_eq!(r.rows.len(), 1, "취소가 하나라도 있는 학생");
+    assert_eq!(r.rows[0].name, "김하나");
+    // 취소로 찾았어도 수강중인 로봇과학 금액까지 더한다
+    assert_eq!(r.rows[0].total, 35_000, "30,000 + 5,000");
+}
+
+#[test]
+fn 학년_반_필터는_그대로_학생을_가른다() {
+    let f = F::new();
+    let a = f.student(1, "가람", 1, "김하나");
+    let b = f.student(2, "나리", 1, "이두리");
+    let d = f.dept("로봇과학", "A", vec![fee(강사료, 10_000)]);
+    f.enroll(a, d);
+    f.enroll(b, d);
+
+    let r = f.보고서(&EnrollmentFilter {
+        grade: Some(1),
+        ..Default::default()
+    });
+    assert_eq!(r.rows.len(), 1);
+    assert_eq!(r.rows[0].name, "김하나");
+    assert_eq!(r.total, 10_000);
+}
+
+#[test]
+fn 목록은_학생_우선_자연정렬이다() {
+    let f = F::new();
+    let d = f.dept("로봇과학", "A", vec![fee(강사료, 1_000)]);
+    for (cls, no) in [("10", 1), ("2", 1), ("1", 1), ("가", 1)] {
+        let s = f.student(1, cls, no, "아무개");
+        f.enroll(s, d);
+    }
+    let r = f.보고서(&EnrollmentFilter::default());
+    let 반: Vec<&str> = r.rows.iter().map(|x| x.class_no.as_str()).collect();
+    assert_eq!(반, vec!["1", "2", "10", "가"], "숫자 반 자연정렬");
+}
+
+#[test]
+fn 지원유형이_학생_줄에도_실린다() {
+    let f = F::new();
+    let a = f.student(1, "가람", 1, "김하나");
+    f.elig(a, "VOUCHER");
+    let d = f.dept("로봇과학", "A", vec![fee(강사료, 10_000)]);
+    f.enroll(a, d);
+
+    let r = f.보고서(&EnrollmentFilter::default());
+    assert_eq!(r.rows[0].programs, vec!["VOUCHER".to_string()]);
+}
+
+#[test]
+fn 정산이_없거나_낡아도_학생_집계가_나온다() {
+    let f = F::new();
+    let a = f.student(1, "가람", 1, "김하나");
+    let d = f.dept("로봇과학", "A", vec![fee(강사료, 10_000)]);
+    let e = f.enroll(a, d);
+
+    // 정산 전
+    assert_eq!(f.보고서(&EnrollmentFilter::default()).total, 10_000);
+
+    // 정산한 뒤 금액을 고쳐 낡게 만든다
+    f.db.write(|c| repo::settle::generate(c, f.ws)).unwrap();
+    f.db
+        .write(|c| repo::enrollment::update_fees(c, e, &[fee(강사료, 12_000)], "인상", &f.items))
+        .unwrap();
+    let st = f.db.read(|c| repo::settle::status(c, f.ws)).unwrap();
+    assert_ne!(st.state, "FRESH", "낡음이어야 한다");
+    assert_eq!(
+        f.보고서(&EnrollmentFilter::default()).total,
+        12_000,
+        "낡아도 원본 charge 로 조회된다"
+    );
+}
+
+// ─────────────────────────────────── 학생별 징수 내역 Excel
 
 fn 징수내역_파일(f: &F, filter: &EnrollmentFilter, cond: &str, tag: &str) -> PathBuf {
     let dir = tmp_dir(&format!("feereport-{tag}"));
@@ -506,75 +726,151 @@ fn 징수내역_파일(f: &F, filter: &EnrollmentFilter, cond: &str, tag: &str) 
     PathBuf::from(&made.path)
 }
 
+/// 첫 장(학생별 합계). 맨 아래 합계 줄을 뺀다.
+fn 합계장(path: &PathBuf) -> read::Sheet {
+    let mut s = read::read_sheet_at(path, 0).unwrap();
+    s.rows.pop();
+    s
+}
+
 #[test]
-fn 징수내역_Excel에_화면과_같은_열이_들어간다() {
+fn Excel_첫_장은_학생별_합계다() {
     let f = F::new();
     let hana = f.student(1, "가람", 1, "홍길동");
     f.elig(hana, "VOUCHER");
-    let d = f.dept("로봇과학", "A", 원래_금액());
-    f.enroll(hana, d);
+    let 로봇 = f.dept("로봇과학", "A", 원래_금액());
+    let 미술 = f.dept("미술", "A", vec![fee(강사료, 20_000)]);
+    f.enroll(hana, 로봇);
+    f.enroll(hana, 미술);
 
-    let path = 징수내역_파일(&f, &EnrollmentFilter::default(), "", "cols");
-    let sheet = read::read_first_sheet(&path).unwrap();
-    for name in ["학년", "반", "번호", "이름", "지원유형", "부서", "합계", "수강상태"] {
+    let path = 징수내역_파일(&f, &EnrollmentFilter::default(), "", "sheet1");
+    let sheet = read::read_sheet_at(&path, 0).unwrap();
+
+    for name in ["학년", "반", "번호", "이름", "지원유형", "합계"] {
         assert!(sheet.require(name).is_ok(), "'{name}' 열이 없습니다");
     }
     for it in &f.items {
         assert!(sheet.require(&it.name).is_ok(), "'{}' 열이 없습니다", it.name);
     }
-    // 정산 결과 열은 넣지 않는다
-    assert!(sheet.col("이용권 사용액").is_none());
-    assert!(sheet.col("자유수강권 사용액").is_none());
+    // 학생당 한 줄이므로 부서·수강상태 열은 없다
+    assert!(sheet.col("부서").is_none(), "첫 장에 부서 열이 있으면 안 된다");
+    assert!(
+        sheet.col("수강상태").is_none(),
+        "첫 장에 수강상태 열이 있으면 안 된다"
+    );
 
+    assert_eq!(sheet.rows.len(), 2, "학생 1줄 + 합계");
     let (_, cells) = &sheet.rows[0];
     assert_eq!(sheet.cell(cells, sheet.col("반")), "가람");
     assert_eq!(sheet.cell(cells, sheet.col("지원유형")), "방과후 이용권");
-    assert_eq!(sheet.cell(cells, sheet.col("수강상태")), "수강중");
-    assert_eq!(sheet.cell(cells, sheet.col("합계")), "58000");
+    assert_eq!(
+        sheet.cell(cells, sheet.col("합계")),
+        "78000",
+        "58,000 + 20,000"
+    );
 }
 
 #[test]
-fn 징수내역_Excel이_화면_필터를_그대로_반영한다() {
+fn Excel_둘째_장은_부서별_상세다() {
     let f = F::new();
-    let d1 = f.dept("로봇과학", "A", vec![fee(강사료, 10_000)]);
-    let d2 = f.dept("미술", "A", vec![fee(강사료, 20_000)]);
+    let hana = f.student(1, "가람", 1, "홍길동");
+    let 로봇 = f.dept("로봇과학", "A", 원래_금액());
+    let 미술 = f.dept("미술", "A", vec![fee(강사료, 20_000)]);
+    f.enroll(hana, 로봇);
+    let e = f.enroll(hana, 미술);
+    f.취소(e, Some(&[fee(강사료, 6_000)]), "중도 포기");
+
+    let path = 징수내역_파일(&f, &EnrollmentFilter::default(), "", "sheet2");
+    let sheet = read::read_sheet_at(&path, 1).unwrap();
+
+    for name in [
+        "학년",
+        "반",
+        "번호",
+        "이름",
+        "지원유형",
+        "부서",
+        "합계",
+        "수강상태",
+    ] {
+        assert!(sheet.require(name).is_ok(), "'{name}' 열이 없습니다");
+    }
+    assert_eq!(sheet.rows.len(), 2, "부서 두 곳");
+
+    let 부서: Vec<String> = sheet
+        .rows
+        .iter()
+        .map(|(_, c)| sheet.cell(c, sheet.col("부서")).to_string())
+        .collect();
+    assert_eq!(부서, vec!["로봇과학A", "미술A"]);
+
+    let 상태: Vec<String> = sheet
+        .rows
+        .iter()
+        .map(|(_, c)| sheet.cell(c, sheet.col("수강상태")).to_string())
+        .collect();
+    assert_eq!(상태, vec!["수강중", "수강취소"]);
+}
+
+#[test]
+fn 두_장의_총액이_같다() {
+    let f = F::new();
     let a = f.student(1, "가람", 1, "김하나");
     let b = f.student(2, "나리", 1, "이두리");
-    f.enroll(a, d1);
-    f.enroll(a, d2);
-    f.enroll(b, d1);
+    let 로봇 = f.dept("로봇과학", "A", 원래_금액());
+    let 미술 = f.dept("미술", "A", vec![fee(강사료, 20_000)]);
+    f.enroll(a, 로봇);
+    f.enroll(a, 미술);
+    let eb = f.enroll(b, 로봇);
+    f.취소(eb, Some(&중도취소_금액()), "중도 포기");
 
-    // 2학년만
-    let path = 징수내역_파일(
-        &f,
-        &EnrollmentFilter {
-            grade: Some(2),
-            ..Default::default()
-        },
-        "2학년",
-        "filter-grade",
-    );
-    let sheet = read::read_first_sheet(&path).unwrap();
-    assert_eq!(sheet.rows.len(), 2, "2학년 한 줄 + 합계");
-    assert_eq!(sheet.cell(&sheet.rows[0].1, sheet.col("이름")), "이두리");
+    let path = 징수내역_파일(&f, &EnrollmentFilter::default(), "", "both");
+    let 첫 = 합계장(&path);
+    let 둘째 = read::read_sheet_at(&path, 1).unwrap();
 
-    // 부서만
-    let path = 징수내역_파일(
-        &f,
-        &EnrollmentFilter {
-            department_id: Some(d1),
-            ..Default::default()
-        },
-        "로봇과학A",
-        "filter-dept",
-    );
-    let sheet = read::read_first_sheet(&path).unwrap();
-    assert_eq!(sheet.rows.len(), 3, "자료 2줄 + 합계");
+    let 합 = |s: &read::Sheet| -> i64 {
+        s.rows
+            .iter()
+            .map(|(_, c)| read::parse_amount(s.cell(c, s.col("합계"))).unwrap())
+            .sum()
+    };
+    assert_eq!(합(&첫), 합(&둘째), "첫 장과 둘째 장의 총액이 다르다");
+
+    // 화면 결과와도 같아야 한다
+    let r = f.보고서(&EnrollmentFilter::default());
+    assert_eq!(합(&첫), r.total);
 }
 
 #[test]
-fn 징수내역_Excel에_적용_조건이_적힌다() {
-    // 전체 자료로 오해하지 않게 파일 이름과 시트 첫 줄에 조건을 적는다.
+fn Excel_첫_장이_화면_목록과_같다() {
+    let f = F::new();
+    let a = f.student(1, "가람", 1, "김하나");
+    let b = f.student(1, "나리", 2, "이두리");
+    let 로봇 = f.dept("로봇과학", "A", 원래_금액());
+    f.enroll(a, 로봇);
+    f.enroll(b, 로봇);
+
+    let filter = EnrollmentFilter::default();
+    let r = f.보고서(&filter);
+    let path = 징수내역_파일(&f, &filter, "", "same");
+    let sheet = 합계장(&path);
+
+    let 파일: Vec<(String, i64)> = sheet
+        .rows
+        .iter()
+        .map(|(_, c)| {
+            (
+                sheet.cell(c, sheet.col("이름")).to_string(),
+                read::parse_amount(sheet.cell(c, sheet.col("합계"))).unwrap(),
+            )
+        })
+        .collect();
+    let 화면: Vec<(String, i64)> = r.rows.iter().map(|x| (x.name.clone(), x.total)).collect();
+    assert_eq!(파일, 화면, "화면과 파일의 줄이 다르다");
+}
+
+#[test]
+fn Excel_합계_줄에_조건과_학생_수가_적힌다() {
     let f = F::new();
     let d = f.dept("로봇과학", "A", vec![fee(강사료, 10_000)]);
     let a = f.student(2, "나리", 1, "이두리");
@@ -594,53 +890,55 @@ fn 징수내역_Excel에_적용_조건이_적힌다() {
     assert!(name.contains("2학년"), "파일 이름에 조건이 없습니다: {name}");
 
     // 헤더는 첫 줄에 그대로 있고, 조건은 맨 아래 합계 줄에 적힌다.
-    let sheet = read::read_first_sheet(&path).unwrap();
+    let sheet = read::read_sheet_at(&path, 0).unwrap();
     assert!(sheet.require("학년").is_ok());
-    assert_eq!(sheet.rows.len(), 2, "자료 1줄 + 합계 1줄");
+    assert_eq!(sheet.rows.len(), 2, "학생 1줄 + 합계 1줄");
     let (_, foot) = &sheet.rows[1];
     assert!(foot.iter().any(|v| v.contains("2학년")), "{foot:?}");
     assert!(foot.iter().any(|v| v.contains("학생 1명")), "{foot:?}");
 }
 
 #[test]
-fn 징수내역_Excel에_취소자와_한글_반이_남는다() {
+fn Excel도_필터를_학생_찾기로_쓴다() {
     let f = F::new();
-    let a = f.student(1, "가람", 1, "김하나");
-    let b = f.student(1, "나리", 2, "이두리");
-    let d = f.dept("로봇과학", "A", 원래_금액());
-    f.enroll(a, d);
-    let eb = f.enroll(b, d);
-    f.취소(eb, Some(&중도취소_금액()), "중도 포기");
+    let 듣는이 = f.student(1, "가람", 1, "김하나");
+    let 안듣는이 = f.student(1, "가람", 2, "이두리");
+    let 로봇 = f.dept("로봇과학", "A", vec![fee(강사료, 30_000)]);
+    let 미술 = f.dept("미술", "A", vec![fee(강사료, 20_000)]);
+    f.enroll(듣는이, 로봇);
+    f.enroll(듣는이, 미술);
+    f.enroll(안듣는이, 미술);
 
-    let path = 징수내역_파일(&f, &EnrollmentFilter::default(), "", "cancel");
-    let sheet = read::read_first_sheet(&path).unwrap();
-    assert_eq!(sheet.rows.len(), 3, "자료 2줄 + 합계");
-    let sheet = 자료만(sheet);
+    let path = 징수내역_파일(
+        &f,
+        &EnrollmentFilter {
+            department_id: Some(로봇),
+            ..Default::default()
+        },
+        "로봇과학A 수강",
+        "dept-filter",
+    );
+    let 첫 = 합계장(&path);
+    assert_eq!(첫.rows.len(), 1, "로봇과학을 듣는 학생 한 명");
+    assert_eq!(
+        첫.cell(&첫.rows[0].1, 첫.col("합계")),
+        "50000",
+        "미술까지 더한 값"
+    );
 
-    let 상태: Vec<String> = sheet
+    // 둘째 장에는 그 학생의 미술 줄도 있어야 한다 — 그러지 않으면 총액이 어긋난다
+    let 둘째 = read::read_sheet_at(&path, 1).unwrap();
+    assert_eq!(둘째.rows.len(), 2);
+    let 부서: Vec<String> = 둘째
         .rows
         .iter()
-        .map(|(_, cells)| sheet.cell(cells, sheet.col("수강상태")).to_string())
+        .map(|(_, c)| 둘째.cell(c, 둘째.col("부서")).to_string())
         .collect();
-    assert_eq!(상태, vec!["수강중", "수강취소"]);
-
-    let 반: Vec<String> = sheet
-        .rows
-        .iter()
-        .map(|(_, cells)| sheet.cell(cells, sheet.col("반")).to_string())
-        .collect();
-    assert_eq!(반, vec!["가람", "나리"]);
-
-    let 합계: Vec<String> = sheet
-        .rows
-        .iter()
-        .map(|(_, cells)| sheet.cell(cells, sheet.col("합계")).to_string())
-        .collect();
-    assert_eq!(합계, vec!["58000", "41500"], "취소자는 확정 금액");
+    assert_eq!(부서, vec!["로봇과학A", "미술A"]);
 }
 
 #[test]
-fn 징수내역_Excel에_0원_취소자도_들어간다() {
+fn Excel에_0원_취소자도_들어간다() {
     let f = F::new();
     let a = f.student(1, "가람", 1, "김하나");
     let d = f.dept("로봇과학", "A", 원래_금액());
@@ -648,14 +946,16 @@ fn 징수내역_Excel에_0원_취소자도_들어간다() {
     f.취소(e, Some(&전액면제()), "개강 전 취소");
 
     let path = 징수내역_파일(&f, &EnrollmentFilter::default(), "", "zero");
-    let sheet = read::read_first_sheet(&path).unwrap();
-    assert_eq!(sheet.rows.len(), 2, "0원이어도 넣는다 (자료 1줄 + 합계)");
-    assert_eq!(sheet.cell(&sheet.rows[0].1, sheet.col("합계")), "0");
-    assert_eq!(sheet.cell(&sheet.rows[0].1, sheet.col("수강상태")), "수강취소");
+    let 첫 = 합계장(&path);
+    assert_eq!(첫.rows.len(), 1, "0원이어도 넣는다");
+    assert_eq!(첫.cell(&첫.rows[0].1, 첫.col("합계")), "0");
+
+    let 둘째 = read::read_sheet_at(&path, 1).unwrap();
+    assert_eq!(둘째.cell(&둘째.rows[0].1, 둘째.col("수강상태")), "수강취소");
 }
 
 #[test]
-fn 징수내역_Excel도_학생_우선_차례다() {
+fn Excel도_학생_우선_차례다() {
     let f = F::new();
     let d = f.dept("로봇과학", "A", vec![fee(강사료, 1_000)]);
     for (cls, no) in [("10", 1), ("2", 1), ("1", 1), ("가", 1)] {
@@ -663,11 +963,34 @@ fn 징수내역_Excel도_학생_우선_차례다() {
         f.enroll(s, d);
     }
     let path = 징수내역_파일(&f, &EnrollmentFilter::default(), "", "order");
-    let sheet = 자료만(read::read_first_sheet(&path).unwrap());
-    let 반: Vec<String> = sheet
+    let 첫 = 합계장(&path);
+    let 반: Vec<String> = 첫
         .rows
         .iter()
-        .map(|(_, cells)| sheet.cell(cells, sheet.col("반")).to_string())
+        .map(|(_, c)| 첫.cell(c, 첫.col("반")).to_string())
         .collect();
     assert_eq!(반, vec!["1", "2", "10", "가"], "숫자 반 자연정렬");
+}
+
+#[test]
+fn Excel_금액은_숫자로_들어간다() {
+    let f = F::new();
+    let a = f.student(1, "가람", 1, "김하나");
+    let d = f.dept("로봇과학", "A", 원래_금액());
+    f.enroll(a, d);
+
+    let path = 징수내역_파일(&f, &EnrollmentFilter::default(), "", "num");
+    for idx in [0usize, 1] {
+        let s = read::read_sheet_at(&path, idx).unwrap();
+        let (_, c) = &s.rows[0];
+        assert_eq!(read::parse_amount(s.cell(c, s.col("합계"))).unwrap(), 58_000);
+        for it in &f.items {
+            assert!(
+                read::parse_amount(s.cell(c, s.col(&it.name))).is_some(),
+                "{} 장의 {} 가 숫자가 아니다",
+                idx,
+                it.name
+            );
+        }
+    }
 }

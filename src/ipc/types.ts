@@ -545,14 +545,50 @@ export interface BulkDeleteResult {
 }
 
 /**
- * 학생별 징수 내역 (행정자료, v0.1.3).
+ * 학생 한 명의 항목별 합계 — 목록 한 줄 (v0.1.4).
  *
- * **정산 결과가 아니다.** 학생에게 발생한 최종 수강료(`charge`) 기준이다.
- * `students`는 중복을 뺀 실제 학생 수이고 `enrollments`는 행 수다.
+ * 네 화면(학생별 징수 내역 · 수익자 · 방과후 이용권 · 자유수강권)이 같은 모양을
+ * 쓴다. 다만 **어디서 나온 돈인지는 화면마다 다르다** — 징수 내역은 원본
+ * `charge`, 나머지 셋은 정산 스냅샷의 배분액이다.
+ */
+export interface StudentSumRow {
+  studentId: number
+  grade: number
+  classNo: string
+  studentNo: number
+  name: string
+  programs: string[]
+  /** 항목별 합계 — 이 학생이 수강하는 모든 부서를 더한 값 */
+  fees: Fee[]
+  total: number
+  /** 이 학생의 상세 줄 수 */
+  details: number
+}
+
+/**
+ * 학생별 징수 내역 (행정자료).
+ *
+ * **정산 결과가 아니다.** 학생에게 발생한 최종 수강료(`charge`) 기준이므로
+ * 정산이 없거나 낡아도 조회된다.
+ *
+ * 필터는 **학생을 찾는 조건**이고, 금액은 언제나 찾은 학생의 **전체** 합계다.
+ * 그래서 `details`에는 걸러진 부서만이 아니라 찾은 학생의 모든 수강 건이 있다.
  */
 export interface FeeReport {
-  rows: Enrollment[]
+  /** 학생당 한 줄 */
+  rows: StudentSumRow[]
+  /** 부서별 상세 — 학생을 눌렀을 때와 Excel 둘째 장 */
+  details: Enrollment[]
   students: number
   enrollments: number
+  /** 항목별 총합 — 화면 요약이 이 값을 쓴다 */
+  fees: Fee[]
+  total: number
+}
+
+export interface SelfPayReport {
+  rows: StudentSumRow[]
+  details: SelfPayRow[]
+  fees: Fee[]
   total: number
 }
