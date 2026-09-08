@@ -77,59 +77,130 @@ pub fn write_proposal(p: &Proposal, dir: &Path) -> AppResult<ExportResult> {
     Ok(done(path, n))
 }
 
-/// 수익자 — 학생 × 부서 (요구사항 §2).
+/// 수익자 — 첫 장은 학생별 합계, 둘째 장은 학생 × 부서 상세 (요구사항 §2).
+///
+/// ## 왜 두 장인가
+///
+/// 화면이 학생별 합계로 바뀌었으므로 파일의 대표 장도 그것이어야 한다(v0.1.4).
+/// 그렇다고 부서별 줄을 없앨 수는 없다 — **부서와 발생원인은 학생 한 줄에
+/// 담기지 않는다.** 한 학생이 여러 부서를 듣고 원인이 섞일 수 있기 때문이다.
+/// 그래서 지금까지 쓰던 부서별 형식을 둘째 장에 그대로 남긴다.
+///
+/// 두 장의 총액은 같다. 금액은 집계 서비스가 만든 값을 그대로 쓴다 — 여기서
+/// 더하지 않는다.
 pub fn write_self_pay(
-    rows: &[SelfPayRow],
+    report: &crate::model::SelfPayReport,
     items: &[CostItem],
     scope: &[&str],
     dir: &Path,
 ) -> AppResult<ExportResult> {
-    let mut headers: Vec<String> = ["학년", "반", "번호", "이름", "부서"]
+    let money = |v: i64| v.to_string();
+    let fee_of = |fees: &[crate::model::Fee], code: &str| -> i64 {
+        fees.iter()
+            .find(|f| f.item_code == code)
+            .map(|f| f.amount)
+            .unwrap_or(0)
+    };
+
+    // ── 첫 장: 학생별 합계. 화면 목록과 같은 줄, 같은 차례다.
+    let mut head1: Vec<String> = ["학년", "반", "번호", "이름"]
         .iter()
         .map(|s| s.to_string())
         .collect();
-    headers.extend(items.iter().map(|i| i.name.clone()));
-    headers.push("합계".to_string());
-    headers.push("발생원인".to_string());
-    let head: Vec<&str> = headers.iter().map(|s| s.as_str()).collect();
+    head1.extend(items.iter().map(|i| i.name.clone()));
+    head1.push("합계".to_string());
 
-    let money_from = 5;
-    let money: Vec<usize> = (money_from..money_from + items.len() + 1).collect();
-
-    let out: Vec<Vec<String>> = rows
+    let money1: Vec<usize> = (4..4 + items.len() + 1).collect();
+    let mut rows1: Vec<Vec<String>> = report
+        .rows
         .iter()
         .map(|r| {
             let mut row = vec![
                 r.grade.to_string(),
-                r.class_no.to_string(),
+                r.class_no.clone(),
+                r.student_no.to_string(),
+                r.name.clone(),
+            ];
+            for it in items {
+                row.push(money(fee_of(&r.fees, &it.code)));
+            }
+            row.push(money(r.total));
+            row
+        })
+        .collect();
+    if !report.rows.is_empty() {
+        let mut foot = vec![
+            "합계".to_string(),
+            String::new(),
+            String::new(),
+            format!("학생 {}명", report.rows.len()),
+        ];
+        for it in items {
+            foot.push(money(fee_of(&report.fees, &it.code)));
+        }
+        foot.push(money(report.total));
+        rows1.push(foot);
+    }
+
+    // ── 둘째 장: 학생 × 부서. v0.1.3 까지 쓰던 형식 그대로다.
+    let mut head2: Vec<String> = ["학년", "반", "번호", "이름", "부서"]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    head2.extend(items.iter().map(|i| i.name.clone()));
+    head2.push("합계".to_string());
+    head2.push("발생원인".to_string());
+
+    let money2: Vec<usize> = (5..5 + items.len() + 1).collect();
+    let rows2: Vec<Vec<String>> = report
+        .details
+        .iter()
+        .map(|r| {
+            let mut row = vec![
+                r.grade.to_string(),
+                r.class_no.clone(),
                 r.student_no.to_string(),
                 r.name.clone(),
                 r.dept_label.clone(),
             ];
             for it in items {
-                row.push(
-                    r.fees
-                        .iter()
-                        .find(|f| f.item_code == it.code)
-                        .map(|f| f.amount)
-                        .unwrap_or(0)
-                        .to_string(),
-                );
+                row.push(money(fee_of(&r.fees, &it.code)));
             }
-            row.push(r.total.to_string());
+            row.push(money(r.total));
             row.push(origin_text(r).to_string());
             row
         })
         .collect();
 
-    let widths = width_plan(
-        &[(3, W_NAME), (4, W_DEPT), (headers.len() - 1, W_WIDE)],
-        headers.len(),
+    let path = write::export_path(dir, "수익자", scope)?;
+    let n = report.rows.len();
+    let w1 = width_plan(&[(3, W_NAME)], head1.len(), W_MONEY);
+    let w2 = width_plan(
+        &[(3, W_NAME), (4, W_DEPT), (head2.len() - 1, W_WIDE)],
+        head2.len(),
         W_MONEY,
     );
-    let path = write::export_path(dir, "수익자", scope)?;
-    let n = out.len();
-    write::write_sheet_sized(&path, "수익자", &head, &out, &money, None, &widths, true)?;
+    write::write_book(
+        &path,
+        &[
+            write::SheetSpec {
+                name: "학생별 합계",
+                headers: head1,
+                rows: rows1,
+                money_cols: money1,
+                widths: w1,
+                bold_last_row: true,
+            },
+            write::SheetSpec {
+                name: "부서별 상세",
+                headers: head2,
+                rows: rows2,
+                money_cols: money2,
+                widths: w2,
+                bold_last_row: false,
+            },
+        ],
+    )?;
     Ok(done(path, n))
 }
 

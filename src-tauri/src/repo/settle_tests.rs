@@ -1156,7 +1156,6 @@ fn 정산_결과도_반_차례대로_나온다() {
 fn 수익자_이용권_자유수강권_Excel에_한글_반이_그대로_나온다() {
     // 품의는 부서별 집계라 반을 쓰지 않는다. 그러나 이 셋은 학생의 반을 찍는다.
     use crate::excel::read;
-    use std::path::PathBuf;
 
     let s = S::new();
     let ws = s.ws("4월", "2026-04-01", "2026-04-30");
@@ -1174,13 +1173,15 @@ fn 수익자_이용권_자유수강권_Excel에_한글_반이_그대로_나온�
     let scope = ["2026학년도", "4월"];
 
     // 수익자
-    let rows = s
+    let report = s
         .db
-        .read(|c| repo::settle::self_pay_rows(c, ws, &s.items))
+        .read(|c| repo::settle::self_pay_report(c, ws, &s.items))
         .unwrap();
-    assert!(!rows.is_empty(), "한도를 넘겨 수익자 부담이 남아야 한다");
-    let made =
-        crate::excel::admin::write_self_pay(&rows, &s.items, &scope, &dir).unwrap();
+    assert!(
+        !report.rows.is_empty(),
+        "한도를 넘겨 수익자 부담이 남아야 한다"
+    );
+    let made = crate::excel::admin::write_self_pay(&report, &s.items, &scope, &dir).unwrap();
     반_확인(&made.path, "해");
 
     // 방과후 이용권 · 자유수강권
@@ -1203,12 +1204,21 @@ fn 수익자_이용권_자유수강권_Excel에_한글_반이_그대로_나온�
         반_확인(&made.path, "해");
     }
 
+    /// 파일의 모든 자료 줄에서 반이 그대로 나오는가.
+    ///
+    /// 맨 아래 합계 줄은 건너뛴다 — 거기 반 칸은 비어 있다.
     fn 반_확인(path: &str, 기대: &str) {
-        let sheet = read::read_first_sheet(&PathBuf::from(path)).unwrap();
+        let sheet = read::read_first_sheet(&std::path::PathBuf::from(path)).unwrap();
         let c = sheet.require("반").unwrap();
+        let mut 본_줄 = 0;
         for (_, cells) in &sheet.rows {
+            if cells.first().map(|v| v.trim()) == Some("합계") {
+                continue;
+            }
             assert_eq!(sheet.cell(cells, Some(c)), 기대, "{path}");
+            본_줄 += 1;
         }
+        assert!(본_줄 > 0, "{path} 에 자료 줄이 없다");
     }
 }
 
@@ -1613,4 +1623,233 @@ fn 취소자도_수익자_화면에_나온다() {
         .unwrap();
     assert_eq!(rows.len(), 1, "취소자도 수익자 화면에 나온다");
     assert_eq!(rows[0].total, 41_500);
+}
+
+// ─────────────────────────────────── 수익자 탭 학생 단위 (v0.1.4)
+//
+// 이용권·자유수강권 탭과 같은 모양으로 맞춘다 — 목록은 학생별 합계,
+// 누르면 부서별 상세.
+//
+// **집계 수준만 바뀐다.** 정산 엔진과 스냅샷은 그대로이므로 총액은 변하지
+// 않아야 한다. 그리고 원본 charge 전체가 아니라 **학부모 부담 배분액만**
+// 모은 것이어야 한다 — 그 구분이 무너지면 학부모가 내는 돈이 부풀려진다.
+
+/// 한 학생이 두 부서에서 수익자 부담을 지는 상황.
+/// 이용권 30,000 지원 → 로봇과학 40,000 가운데 30,000 지원, 10,000 초과금.
+/// 미술 25,000 은 전액 수익자.
+fn 두_부서_수익자(s: &S) -> (i64, i64, i64, i64) {
+    let ws = s.ws("4월", "2026-04-01", "2026-04-30");
+    let hana = s.student(3, 1, 1, "김하나");
+    let robot = s.dept(ws, "로봇과학", vec![fee(강사료, 40_000)]);
+    let art = s.dept(ws, "미술", vec![fee(강사료, 25_000)]);
+    s.enroll(ws, hana, robot);
+    s.enroll(ws, hana, art);
+    s.policy(Program::Voucher, 30_000, false, "3", &[]);
+    s.elig(hana, Program::Voucher);
+    s.db.write(|c| repo::priority::dept_save(c, ws, &[robot, art]))
+        .unwrap();
+    s.generate(ws);
+    (ws, hana, robot, art)
+}
+
+fn 보고서(s: &S, ws: i64) -> crate::model::SelfPayReport {
+    s.db
+        .read(|c| repo::settle::self_pay_report(c, ws, &s.items))
+        .unwrap()
+}
+
+#[test]
+fn 수익자_목록이_학생당_한_줄이다() {
+    let s = S::new();
+    let (ws, hana, _, _) = 두_부서_수익자(&s);
+
+    let r = 보고서(&s, ws);
+    assert_eq!(r.rows.len(), 1, "부서는 둘이지만 학생은 한 명");
+    assert_eq!(r.rows[0].student_id, hana);
+    assert_eq!(r.rows[0].details, 2, "누르면 부서 두 줄");
+    assert_eq!(r.details.len(), 2, "상세는 부서별로 그대로");
+}
+
+#[test]
+fn 학생_합계가_부서별_상세의_합이다() {
+    let s = S::new();
+    let (ws, _, _, _) = 두_부서_수익자(&s);
+
+    let r = 보고서(&s, ws);
+    for row in &r.rows {
+        let 그_학생: i64 = r
+            .details
+            .iter()
+            .filter(|d| d.student_id == row.student_id)
+            .map(|d| d.total)
+            .sum();
+        assert_eq!(row.total, 그_학생, "{} 학생", row.name);
+        assert_eq!(row.fees.iter().map(|f| f.amount).sum::<i64>(), row.total);
+    }
+    assert_eq!(r.total, r.rows.iter().map(|x| x.total).sum::<i64>());
+    assert_eq!(r.total, r.details.iter().map(|x| x.total).sum::<i64>());
+}
+
+#[test]
+fn 수익자_총액은_집계_수준을_바꿔도_그대로다() {
+    let s = S::new();
+    let (ws, _, _, _) = 두_부서_수익자(&s);
+
+    // 초과금 10,000 + 미술 전액 25,000
+    let 정산 = s.fund(ws, "SELF_PAY") + s.fund(ws, "VOUCHER_OVER");
+    assert_eq!(정산, 35_000);
+
+    let r = 보고서(&s, ws);
+    assert_eq!(r.total, 정산, "학생별 합계 총액이 정산 결과와 다르다");
+
+    // 부서별 줄(v0.1.3 까지의 결과)과도 같아야 한다
+    let 옛 = s
+        .db
+        .read(|c| repo::settle::self_pay_rows(c, ws, &s.items))
+        .unwrap();
+    assert_eq!(r.total, 옛.iter().map(|x| x.total).sum::<i64>());
+}
+
+#[test]
+fn 이용권으로_지원된_금액은_수익자에_들어오지_않는다() {
+    let s = S::new();
+    let (ws, _, _, _) = 두_부서_수익자(&s);
+
+    // 원본 charge 는 65,000 이지만 수익자는 35,000 뿐이다
+    let charge: i64 = s
+        .db
+        .read(|c| {
+            Ok(c.query_row(
+                "SELECT COALESCE(SUM(ch.amount), 0) FROM charge ch
+                   JOIN enrollment e ON e.id = ch.enrollment_id
+                  WHERE e.workspace_id = ?1",
+                rusqlite::params![ws],
+                |r| r.get(0),
+            )?)
+        })
+        .unwrap();
+    assert_eq!(charge, 65_000);
+
+    let r = 보고서(&s, ws);
+    assert_eq!(r.total, 35_000, "이용권 지원 30,000 이 섞이면 안 된다");
+    assert_ne!(r.total, charge, "원본 charge 전체를 더하면 안 된다");
+    assert_eq!(s.fund(ws, "VOUCHER"), 30_000, "지원금은 이용권 탭에 있다");
+}
+
+#[test]
+fn 수익자_줄에_지원유형이_실린다() {
+    let s = S::new();
+    let (ws, _, _, _) = 두_부서_수익자(&s);
+    let r = 보고서(&s, ws);
+    assert_eq!(r.rows[0].programs, vec!["VOUCHER".to_string()]);
+}
+
+#[test]
+fn 부담이_없는_학생은_수익자에_나오지_않는다() {
+    let s = S::new();
+    let ws = s.ws("4월", "2026-04-01", "2026-04-30");
+    let hana = s.student(3, 1, 1, "김하나");
+    let d = s.dept(ws, "로봇과학", vec![fee(강사료, 20_000)]);
+    s.enroll(ws, hana, d);
+    s.policy(Program::Voucher, 500_000, false, "3", &[]);
+    s.elig(hana, Program::Voucher);
+    s.generate(ws);
+
+    let r = 보고서(&s, ws);
+    assert!(r.rows.is_empty(), "전액 지원이면 수익자 줄이 없다");
+    assert_eq!(r.total, 0);
+}
+
+#[test]
+fn 정산이_없으면_수익자도_비어_있다() {
+    let s = S::new();
+    let ws = s.ws("4월", "2026-04-01", "2026-04-30");
+    let r = 보고서(&s, ws);
+    assert!(r.rows.is_empty());
+    assert!(r.details.is_empty());
+    assert_eq!(r.total, 0);
+}
+
+#[test]
+fn 수익자_Excel_두_장의_총액이_같다() {
+    use crate::excel::read;
+
+    let s = S::new();
+    let (ws, _, _, _) = 두_부서_수익자(&s);
+    let r = 보고서(&s, ws);
+
+    let dir = std::env::temp_dir().join("afterschool-selfpay-book");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let made =
+        crate::excel::admin::write_self_pay(&r, &s.items, &["2026학년도", "4월"], &dir).unwrap();
+    let path = std::path::PathBuf::from(&made.path);
+
+    // 첫 장: 학생별 합계. 부서·발생원인 열은 없다.
+    let 첫 = read::read_sheet_at(&path, 0).unwrap();
+    assert!(첫.col("부서").is_none(), "첫 장에 부서 열이 있으면 안 된다");
+    assert!(첫.col("발생원인").is_none());
+    for name in ["학년", "반", "번호", "이름", "합계"] {
+        assert!(첫.require(name).is_ok(), "'{name}' 열이 없다");
+    }
+    assert_eq!(첫.rows.len(), 2, "학생 1줄 + 합계");
+
+    // 둘째 장: 부서별 상세. v0.1.3 까지의 형식 그대로다.
+    let 둘째 = read::read_sheet_at(&path, 1).unwrap();
+    for name in ["학년", "반", "번호", "이름", "부서", "합계", "발생원인"] {
+        assert!(둘째.require(name).is_ok(), "'{name}' 열이 없다");
+    }
+    assert_eq!(둘째.rows.len(), 2, "부서 두 줄");
+
+    let 합 = |sh: &read::Sheet, 합계줄: bool| -> i64 {
+        sh.rows
+            .iter()
+            .filter(|(_, c)| 합계줄 || c.first().map(|v| v.trim()) != Some("합계"))
+            .map(|(_, c)| read::parse_amount(sh.cell(c, sh.col("합계"))).unwrap())
+            .sum()
+    };
+    assert_eq!(합(&첫, false), 합(&둘째, false), "두 장의 총액이 다르다");
+    assert_eq!(합(&첫, false), r.total, "화면 결과와 다르다");
+    // 맨 아래 합계 줄도 같은 값이어야 한다
+    let (_, foot) = 첫.rows.last().unwrap();
+    assert_eq!(
+        read::parse_amount(첫.cell(foot, 첫.col("합계"))).unwrap(),
+        r.total
+    );
+}
+
+#[test]
+fn 수익자_Excel_첫_장이_화면_목록과_같다() {
+    use crate::excel::read;
+
+    let s = S::new();
+    let ws = s.ws("4월", "2026-04-01", "2026-04-30");
+    let a = s.student(5, 1, 1, "김오학");
+    let b = s.student(5, 1, 2, "이오학");
+    let d = s.dept(ws, "로봇과학", vec![fee(강사료, 30_000)]);
+    s.enroll(ws, a, d);
+    s.enroll(ws, b, d);
+    s.policy(Program::Voucher, 500_000, false, "3", &[]);
+    s.generate(ws);
+
+    let r = 보고서(&s, ws);
+    let dir = std::env::temp_dir().join("afterschool-selfpay-same");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let made = crate::excel::admin::write_self_pay(&r, &s.items, &["4월"], &dir).unwrap();
+
+    let mut 첫 = read::read_sheet_at(&std::path::PathBuf::from(&made.path), 0).unwrap();
+    첫.rows.pop(); // 합계 줄
+    let 파일: Vec<(String, i64)> = 첫
+        .rows
+        .iter()
+        .map(|(_, c)| {
+            (
+                첫.cell(c, 첫.col("이름")).to_string(),
+                read::parse_amount(첫.cell(c, 첫.col("합계"))).unwrap(),
+            )
+        })
+        .collect();
+    let 화면: Vec<(String, i64)> = r.rows.iter().map(|x| (x.name.clone(), x.total)).collect();
+    assert_eq!(파일, 화면);
 }

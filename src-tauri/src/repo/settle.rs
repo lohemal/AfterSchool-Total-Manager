@@ -1111,6 +1111,108 @@ pub fn self_pay_rows(
         .collect())
 }
 
+/// 수익자 탭 — 학생별 합계 + 부서별 상세 (v0.1.4).
+///
+/// 이용권·자유수강권 탭과 같은 모양으로 맞춘다 — **목록에서 학생이 얼마인지
+/// 보고, 눌러서 왜 그 금액인지 본다.**
+///
+/// ## 원본 charge 를 더하지 않는다
+///
+/// 여기서 더하는 것은 정산 스냅샷의 배분액 가운데 **학부모 부담**
+/// (`SELF_PAY` + `VOUCHER_OVER`)뿐이다. 이용권으로 정상 지원된 금액은 들어오지
+/// 않는다. 학생별 징수 내역(원본 `charge` 전체)과 섞으면 학부모가 실제로 내는
+/// 돈이 부풀려진다.
+///
+/// 집계만 한다 — `self_pay_rows`가 만든 줄을 학생별로 모으는 것이 전부이고,
+/// 정산 결과의 총액은 달라지지 않는다.
+pub fn self_pay_report(
+    conn: &Connection,
+    workspace_id: i64,
+    items: &[CostItem],
+) -> AppResult<crate::model::SelfPayReport> {
+    let details = self_pay_rows(conn, workspace_id, items)?;
+
+    let mut order: Vec<i64> = Vec::new();
+    let mut rows: HashMap<i64, crate::model::StudentSumRow> = HashMap::new();
+    let mut per_student: HashMap<i64, HashMap<String, i64>> = HashMap::new();
+    let mut grand: HashMap<String, i64> = HashMap::new();
+
+    // 지원유형은 학생 자격에서 온다 — 배분액에는 들어 있지 않다.
+    let programs = student_programs(conn, workspace_id)?;
+
+    for d in &details {
+        if !rows.contains_key(&d.student_id) {
+            order.push(d.student_id);
+            rows.insert(
+                d.student_id,
+                crate::model::StudentSumRow {
+                    student_id: d.student_id,
+                    grade: d.grade,
+                    class_no: d.class_no.clone(),
+                    student_no: d.student_no,
+                    name: d.name.clone(),
+                    programs: programs.get(&d.student_id).cloned().unwrap_or_default(),
+                    fees: Vec::new(),
+                    total: 0,
+                    details: 0,
+                },
+            );
+        }
+        let row = rows.get_mut(&d.student_id).expect("방금 넣었다");
+        row.details += 1;
+        let mine = per_student.entry(d.student_id).or_default();
+        for f in &d.fees {
+            *mine.entry(f.item_code.clone()).or_insert(0) += f.amount;
+            *grand.entry(f.item_code.clone()).or_insert(0) += f.amount;
+        }
+    }
+
+    let out: Vec<crate::model::StudentSumRow> = order
+        .into_iter()
+        .filter_map(|id| {
+            let mut row = rows.remove(&id)?;
+            let empty = HashMap::new();
+            let map = per_student.get(&id).unwrap_or(&empty);
+            let (fees, total) = fees_of(items, map);
+            row.fees = fees;
+            row.total = total;
+            Some(row)
+        })
+        .collect();
+
+    let (fees, total) = fees_of(items, &grand);
+    Ok(crate::model::SelfPayReport {
+        rows: out,
+        details,
+        fees,
+        total,
+    })
+}
+
+/// 이 작업공간 기간에 유효한 학생별 지원제도.
+///
+/// 유효기간 판단은 수강생 명단과 같은 규칙이다 — 작업공간 기간과 겹치면 유효.
+fn student_programs(conn: &Connection, workspace_id: i64) -> AppResult<HashMap<i64, Vec<String>>> {
+    let mut st = conn.prepare(
+        "SELECT DISTINCT e.student_id, el.program
+           FROM enrollment e
+           JOIN workspace w ON w.id = e.workspace_id
+           JOIN support_eligibility el ON el.student_id = e.student_id
+          WHERE e.workspace_id = ?1
+            AND (el.valid_from IS NULL OR el.valid_from <= w.end_date)
+            AND (el.valid_to   IS NULL OR el.valid_to   >= w.start_date)
+          ORDER BY e.student_id, el.program",
+    )?;
+    let mut out: HashMap<i64, Vec<String>> = HashMap::new();
+    for row in st.query_map(params![workspace_id], |r| {
+        Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?))
+    })? {
+        let (id, program) = row?;
+        out.entry(id).or_default().push(program);
+    }
+    Ok(out)
+}
+
 /// 이용권 · 자유수강권 탭 (요구사항 §17·§18).
 pub fn program_rows(
     conn: &Connection,

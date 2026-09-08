@@ -6,7 +6,7 @@ use crate::db::Db;
 use crate::domain::Program;
 use crate::error::{AppError, AppResult};
 use crate::model::{
-    GenerateResult, Grant, GrantInput, Issue, PriorityRow, ProgramRow, SelfPayRow, SettlementStatus,
+    GenerateResult, Grant, GrantInput, Issue, PriorityRow, ProgramRow, SettlementStatus,
     Summary, SupportState,
 };
 use crate::repo;
@@ -41,11 +41,18 @@ pub fn settlement_summary(db: State<'_, Db>, workspace_id: i64) -> AppResult<Opt
     })
 }
 
+/// 수익자 탭 — 학생별 합계 + 부서별 상세 (v0.1.4).
+///
+/// 이용권·자유수강권과 같은 모양이다. 금액은 정산 스냅샷의 학부모 부담 배분액만
+/// 모은 것으로, 원본 `charge` 전체가 아니다.
 #[tauri::command]
-pub fn settlement_self_pay(db: State<'_, Db>, workspace_id: i64) -> AppResult<Vec<SelfPayRow>> {
+pub fn settlement_self_pay(
+    db: State<'_, Db>,
+    workspace_id: i64,
+) -> AppResult<crate::model::SelfPayReport> {
     db.read(|c| {
         let items = repo::cost_items(c)?;
-        repo::settle::self_pay_rows(c, workspace_id, &items)
+        repo::settle::self_pay_report(c, workspace_id, &items)
     })
 }
 
@@ -190,8 +197,8 @@ pub fn settlement_export(
 
         match kind.as_str() {
             "self_pay" => {
-                let rows = repo::settle::self_pay_rows(c, workspace_id, &items)?;
-                excel::admin::write_self_pay(&rows, &items, &scope, &dir)
+                let report = repo::settle::self_pay_report(c, workspace_id, &items)?;
+                excel::admin::write_self_pay(&report, &items, &scope, &dir)
             }
             "voucher" => {
                 let rows =

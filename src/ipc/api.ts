@@ -43,7 +43,7 @@ import type {
   ProgramRow,
   RestoreReport,
   RowIssue,
-  SelfPayRow,
+  SelfPayReport,
   SettleExportKind,
   SettlementStatus,
   StudentAllocRow,
@@ -215,7 +215,7 @@ export const api = {
   settlementSummary: (workspaceId: number) =>
     invoke<Summary | null>('settlement_summary', { workspaceId }),
   settlementSelfPay: (workspaceId: number) =>
-    invoke<SelfPayRow[]>('settlement_self_pay', { workspaceId }),
+    invoke<SelfPayReport>('settlement_self_pay', { workspaceId }),
   settlementProgram: (workspaceId: number, program: ProgramCode) =>
     invoke<ProgramRow[]>('settlement_program', { workspaceId, program }),
   settlementStudentSupports: (workspaceId: number, studentId: number) =>

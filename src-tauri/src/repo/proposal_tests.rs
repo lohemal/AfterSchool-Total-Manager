@@ -702,20 +702,22 @@ fn 수익자_Excel을_만든다() {
     let p = P::new();
     여러_상황(&p);
     let dir = tmp_dir("self-pay");
-    let rows = p
+    let report = p
         .db
-        .read(|c| repo::settle::self_pay_rows(c, p.ws, &p.items))
+        .read(|c| repo::settle::self_pay_report(c, p.ws, &p.items))
         .unwrap();
     let made =
-        crate::excel::admin::write_self_pay(&rows, &p.items, &["2026학년도", "4월"], &dir).unwrap();
+        crate::excel::admin::write_self_pay(&report, &p.items, &["2026학년도", "4월"], &dir)
+            .unwrap();
 
-    let sheet = read::read_first_sheet(&PathBuf::from(&made.path)).unwrap();
+    // 부서·발생원인은 학생 한 줄에 담기지 않으므로 둘째 장에 남는다
+    let sheet = read::read_sheet_at(&PathBuf::from(&made.path), 1).unwrap();
     assert_eq!(sheet.headers[0], "학년");
     assert_eq!(sheet.headers[4], "부서");
     assert_eq!(sheet.headers[5], "강사료");
     assert_eq!(sheet.headers[9], "합계");
     assert_eq!(sheet.headers[10], "발생원인");
-    assert_eq!(sheet.rows.len(), rows.len());
+    assert_eq!(sheet.rows.len(), report.details.len());
 
     // 내부 코드가 아니라 한글 문구가 들어 있어야 한다
     for (_, cells) in &sheet.rows {
