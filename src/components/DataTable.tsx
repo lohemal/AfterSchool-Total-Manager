@@ -8,6 +8,7 @@
 
 import { useMemo, useState, type ReactNode } from 'react'
 import { compareClassNo } from '@/lib/format'
+import { isControlPath } from '@/lib/rowAction'
 
 export interface Column<T> {
   key: string
@@ -26,6 +27,7 @@ export function DataTable<T>({
   selected,
   onSelected,
   onRowClick,
+  onRowDoubleClick,
   activeId,
   empty,
   maxHeight,
@@ -38,6 +40,11 @@ export function DataTable<T>({
   selected?: number[]
   onSelected?: (ids: number[]) => void
   onRowClick?: (row: T) => void
+  /**
+   * 줄을 두 번 누를 때. 화면마다 **기존 [수정] 버튼과 똑같은 것**을 건다.
+   * 한 번 누르는 것은 그대로 선택이다.
+   */
+  onRowDoubleClick?: (row: T) => void
   activeId?: number | null
   empty?: ReactNode
   maxHeight?: number
@@ -107,10 +114,19 @@ export function DataTable<T>({
                   key={id}
                   className={on ? 'on' : undefined}
                   onClick={() => onRowClick?.(row)}
-                  style={onRowClick ? { cursor: 'pointer' } : undefined}
+                  onDoubleClick={(e) => {
+                    if (!onRowDoubleClick) return
+                    if (isControlPath(tagPath(e.target, e.currentTarget))) return
+                    onRowDoubleClick(row)
+                  }}
+                  style={onRowClick || onRowDoubleClick ? { cursor: 'pointer' } : undefined}
                 >
                   {selectable && (
-                    <td className="check" onClick={(e) => e.stopPropagation()}>
+                    <td
+                      className="check"
+                      onClick={(e) => e.stopPropagation()}
+                      onDoubleClick={(e) => e.stopPropagation()}
+                    >
                       <input
                         type="checkbox"
                         aria-label="선택"
@@ -164,6 +180,21 @@ export function DataTable<T>({
       )}
     </>
   )
+}
+
+/**
+ * 눌린 곳부터 줄까지 올라가며 태그 이름을 모은다.
+ *
+ * 규칙 판단은 `isControlPath`가 한다 — 그쪽은 DOM 없이 시험할 수 있다.
+ */
+function tagPath(from: EventTarget | null, stop: Element): string[] {
+  const out: string[] = []
+  let el = from instanceof Element ? from : null
+  while (el && el !== stop) {
+    out.push(el.tagName)
+    el = el.parentElement
+  }
+  return out
 }
 
 /** 오름차순 비교기 몇 개 — 화면마다 다시 쓰지 않도록. */

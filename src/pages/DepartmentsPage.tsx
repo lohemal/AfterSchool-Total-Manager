@@ -154,7 +154,12 @@ export function DepartmentsPage() {
             <Button variant="primary" small onClick={() => setEditing('new')}>
               수기 추가
             </Button>
-            <Button small disabled={!one} onClick={() => one && setEditing(one)}>
+            <Button
+              small
+              disabled={!one}
+              title="줄을 두 번 눌러도 수정창이 열립니다"
+              onClick={() => one && setEditing(one)}
+            >
               수정
             </Button>
             <Button
@@ -190,6 +195,10 @@ export function DepartmentsPage() {
           </div>
         </div>
 
+        <div className="toolbar__note">
+          줄을 두 번 누르면 <b>수정</b>창이 열립니다. 한 번 누르는 것은 선택입니다.
+        </div>
+
         <DataTable
           rows={list.data ?? []}
           columns={columns}
@@ -197,6 +206,7 @@ export function DepartmentsPage() {
           selected={selected}
           onSelected={setSelected}
           onRowClick={(d) => setSelected([d.id])}
+          onRowDoubleClick={(d) => setEditing(d)}
           empty={list.isLoading ? '불러오는 중…' : '부서가 없습니다.'}
           foot={
             <>

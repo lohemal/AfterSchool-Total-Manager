@@ -166,7 +166,12 @@ export function EligibilityPage() {
             <Button variant="primary" small onClick={() => setEditing('new')}>
               수기 추가
             </Button>
-            <Button small disabled={!one} onClick={() => one && setEditing(one)}>
+            <Button
+              small
+              disabled={!one}
+              title="줄을 두 번 눌러도 수정창이 열립니다"
+              onClick={() => one && setEditing(one)}
+            >
               수정
             </Button>
             <Button small variant="danger" disabled={selected.length === 0} onClick={() => setConfirm('some')}>
@@ -193,7 +198,7 @@ export function EligibilityPage() {
             </Button>
             <span className="toolbar__spacer" />
             <span className="hint">
-              적용기간을 비우면 학년도 내내 유효합니다. 중도에 바뀐 학생만 날짜를 넣으세요.
+              적용기간을 비우면 학년도 내내 유효합니다. 중도에 바뀐 학생만 날짜를 넣으세요. 줄을 두 번 누르면 수정창이 열립니다.
             </span>
           </div>
         </div>
@@ -205,6 +210,7 @@ export function EligibilityPage() {
           selected={selected}
           onSelected={setSelected}
           onRowClick={(r) => setSelected([r.id])}
+          onRowDoubleClick={(r) => setEditing(r)}
           empty={view.isLoading ? '불러오는 중…' : '대상자가 없습니다.'}
         />
       </Card>
