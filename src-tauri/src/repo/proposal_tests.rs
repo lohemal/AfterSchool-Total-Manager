@@ -94,6 +94,11 @@ impl P {
     }
 
     fn dept(&self, name: &str, fees: Vec<Fee>) -> i64 {
+        self.dept_class(name, "A반", fees)
+    }
+
+    /// 반 이름까지 정하는 판 — 같은 부서명의 A반·B반을 만들 때 쓴다.
+    fn dept_class(&self, name: &str, class_name: &str, fees: Vec<Fee>) -> i64 {
         self.db
             .write(|c| {
                 repo::department::create(
@@ -101,7 +106,7 @@ impl P {
                     self.ws,
                     &DepartmentInput {
                         name: name.into(),
-                        class_name: Some("A반".into()),
+                        class_name: Some(class_name.into()),
                         teacher: None,
                         days: None,
                         note: None,
@@ -333,7 +338,7 @@ fn 일반_수익자만_있는_부서는_수익자_열에만_들어간다() {
     let 강사 = p.proposal(강사료);
 
     let row = 강사.rows.iter().find(|r| r.department_id == 축구).unwrap();
-    assert_eq!(row.dept_label, "축구A반");
+    assert_eq!(row.dept_label, "축구"); // 품의는 반을 떼고 부서명으로 올린다
     assert_eq!(row.amounts[0], 30_000, "수익자");
     assert_eq!(row.amounts[1], 0, "초과금");
     assert_eq!(row.amounts[2], 0, "지원금");
@@ -412,7 +417,7 @@ fn 금액이_없는_부서는_품의에_넣지_않는다() {
     // 수용비가 있는 부서는 컴퓨터뿐이다
     let 수용 = p.proposal(수용비);
     assert_eq!(수용.rows.len(), 1);
-    assert_eq!(수용.rows[0].dept_label, "컴퓨터A반");
+    assert_eq!(수용.rows[0].dept_label, "컴퓨터");
     assert_eq!(수용.total.total, 5_000);
 }
 
@@ -788,4 +793,162 @@ fn 맞지_않는_품의는_파일을_만들지_않는다() {
     let err = crate::excel::admin::write_proposal(&pr, &dir).unwrap_err();
     assert!(err.message.contains("맞지 않아"));
     assert!(std::fs::read_dir(&dir).unwrap().next().is_none(), "파일이 없어야 한다");
+}
+
+// ─────────────────────────────────────────────── 같은 부서명 통합 (v0.1.4)
+//
+// 학교 회계는 부서명 단위로 움직인다. `로봇과학A반`과 `로봇과학B반`을 따로
+// 올리면 담당자가 손으로 더해야 하므로 품의에서만 한 줄로 합친다.
+// **원본 `department`·`enrollment`·`charge`·`settlement_alloc`은 건드리지 않는다.**
+
+/// 로봇과학 A/B반 + 미술 A반. 셋 다 강사료·재료비가 있다.
+/// 학생은 지원자격이 없어 전액 수익자로 떨어진다 — 열이 섞이지 않아 읽기 쉽다.
+fn 반이_둘인_부서(p: &P) -> (i64, i64, i64) {
+    let 가 = p.student(5, 1, "가학생");
+    let 나 = p.student(5, 2, "나학생");
+    let 다 = p.student(5, 3, "다학생");
+
+    let a = p.dept_class("로봇과학", "A반", vec![fee(강사료, 30_000), fee(재료비, 5_000)]);
+    let b = p.dept_class("로봇과학", "B반", vec![fee(강사료, 20_000), fee(재료비, 3_000)]);
+    let 미술 = p.dept_class("미술", "A반", vec![fee(강사료, 10_000)]);
+
+    p.enroll(가, a);
+    p.enroll(나, b);
+    p.enroll(다, 미술);
+    p.settle();
+    (a, b, 미술)
+}
+
+#[test]
+fn 같은_부서명_반이_다르면_한_줄로_합친다() {
+    let p = P::new();
+    반이_둘인_부서(&p);
+
+    let 강사 = p.proposal(강사료);
+    let 로봇: Vec<_> = 강사.rows.iter().filter(|r| r.dept_label == "로봇과학").collect();
+    assert_eq!(로봇.len(), 1, "로봇과학이 한 줄이어야 한다");
+    // 30,000(A반) + 20,000(B반)
+    assert_eq!(로봇[0].amounts[0], 50_000, "수익자 열이 두 반의 합");
+    assert_eq!(로봇[0].total, 50_000);
+}
+
+#[test]
+fn 반_이름은_품의에_나오지_않는다() {
+    let p = P::new();
+    반이_둘인_부서(&p);
+
+    for r in &p.proposal(강사료).rows {
+        assert!(!r.dept_label.contains('반'), "'{}'에 반 이름이 남았다", r.dept_label);
+    }
+}
+
+#[test]
+fn 서로_다른_부서명은_따로_나온다() {
+    let p = P::new();
+    반이_둘인_부서(&p);
+
+    let 강사 = p.proposal(강사료);
+    assert_eq!(강사.rows.len(), 2, "로봇과학 · 미술");
+    let 이름: Vec<&str> = 강사.rows.iter().map(|r| r.dept_label.as_str()).collect();
+    assert_eq!(이름, vec!["로봇과학", "미술"]);
+    let 미술 = 강사.rows.iter().find(|r| r.dept_label == "미술").unwrap();
+    assert_eq!(미술.total, 10_000, "미술은 로봇과학에 섞이지 않는다");
+}
+
+#[test]
+fn 반을_합쳐도_품의_총액은_정산_총액과_같다() {
+    let p = P::new();
+    반이_둘인_부서(&p);
+
+    for kind in [강사료, 재료비, "TEXTBOOK+MATERIAL"] {
+        let pr = p.proposal(kind);
+        assert!(pr.balanced, "{kind} 이 어긋난다");
+        assert_eq!(
+            pr.total.total, pr.settlement_total,
+            "{kind} 품의 총액 ≠ 정산 총액"
+        );
+        assert_eq!(
+            pr.total.total,
+            pr.rows.iter().map(|r| r.total).sum::<i64>(),
+            "{kind} 합계 행 ≠ 줄들의 합"
+        );
+    }
+}
+
+#[test]
+fn 재원별로_각각_합산된다() {
+    let p = P::new();
+    // 로봇과학 A반은 이용권 학생, B반은 자격 없는 학생 — 한 부서명에 두 재원이 섞인다
+    let 이용권 = p.student(3, 1, "김하나");
+    let 일반 = p.student(5, 1, "박오학");
+    p.elig(이용권, Program::Voucher);
+
+    let a = p.dept_class("로봇과학", "A반", vec![fee(강사료, 40_000)]);
+    let b = p.dept_class("로봇과학", "B반", vec![fee(강사료, 25_000)]);
+    p.enroll(이용권, a);
+    p.enroll(일반, b);
+    p.settle();
+
+    let 강사 = p.proposal(강사료);
+    let 로봇 = 강사.rows.iter().find(|r| r.dept_label == "로봇과학").unwrap();
+    assert_eq!(로봇.amounts[0], 25_000, "수익자 — B반 학생만");
+    assert_eq!(로봇.amounts[1], 0, "초과금 — 한도 안이라 없다");
+    assert_eq!(로봇.amounts[2], 40_000, "이용권 지원금 — A반 학생만");
+    assert_eq!(로봇.amounts[3], 0, "자유수강권");
+    assert_eq!(로봇.total, 65_000);
+    // 열별 합계가 정산 쪽과 1원까지 같은가
+    assert_eq!(p.col(&강사, "SELF_PAY"), p.alloc_sum("SELF_PAY", &[강사료]));
+    assert_eq!(p.col(&강사, "VOUCHER"), p.alloc_sum("VOUCHER", &[강사료]));
+}
+
+#[test]
+fn 통합해도_미리보기와_Excel이_같다() {
+    use crate::excel::read;
+
+    let p = P::new();
+    반이_둘인_부서(&p);
+
+    let pr = p.proposal(강사료);
+    let dir = tmp_dir("proposal-merge");
+    let made = crate::excel::admin::write_proposal(&pr, &dir).unwrap();
+    let sheet = read::read_first_sheet(&PathBuf::from(&made.path)).unwrap();
+
+    // 마지막 줄은 합계 행이므로 뺀다
+    let 파일줄: Vec<(String, i64)> = sheet
+        .rows
+        .iter()
+        .take(sheet.rows.len() - 1)
+        .map(|(_, cells)| (cells[0].clone(), read::parse_amount(&cells[5]).unwrap()))
+        .collect();
+    let 화면줄: Vec<(String, i64)> = pr
+        .rows
+        .iter()
+        .map(|r| (r.dept_label.clone(), r.total))
+        .collect();
+    assert_eq!(파일줄, 화면줄, "화면과 파일의 줄이 다르다");
+    assert_eq!(파일줄.len(), 2, "로봇과학 · 미술 두 줄");
+
+    let last = sheet.rows.last().unwrap();
+    assert_eq!(read::parse_amount(&last.1[5]).unwrap(), pr.total.total);
+}
+
+#[test]
+fn 부서정보와_수강생_명단은_반을_그대로_가른다() {
+    let p = P::new();
+    let (a, b, _) = 반이_둘인_부서(&p);
+
+    // 원본 부서는 둘 다 살아 있다
+    let depts = p.db.read(|c| repo::department::list(c, p.ws, None)).unwrap();
+    let 로봇: Vec<_> = depts.iter().filter(|d| d.name == "로봇과학").collect();
+    assert_eq!(로봇.len(), 2, "부서정보에서는 A반·B반이 그대로");
+    assert!(로봇.iter().any(|d| d.class_name == "A반"));
+    assert!(로봇.iter().any(|d| d.class_name == "B반"));
+
+    // 수강생 명단도 부서별로 갈린다
+    let 명단 = p
+        .db
+        .read(|c| repo::enrollment::list(c, p.ws, &p.items, &Default::default()))
+        .unwrap();
+    assert!(명단.iter().any(|e| e.department_id == a && e.dept_label == "로봇과학A반"));
+    assert!(명단.iter().any(|e| e.department_id == b && e.dept_label == "로봇과학B반"));
 }

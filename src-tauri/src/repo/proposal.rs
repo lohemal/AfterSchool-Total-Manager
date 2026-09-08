@@ -2,8 +2,8 @@
 //!
 //! ## 이 파일이 하는 일과 하지 않는 일
 //!
-//! * **한다** — 최신 유효 정산의 `settlement_alloc`을 부서 × 재원으로 모으고,
-//!   그 학년도의 대상학년에서 열 이름표를 만든다.
+//! * **한다** — 최신 유효 정산의 `settlement_alloc`을 **부서명** × 재원으로 모으고,
+//!   그 학년도의 대상학년에서 열 이름표를 만든다. 같은 부서명의 A반·B반은 한 줄이다.
 //! * **하지 않는다** — 금액을 다시 계산하지 않는다. 원본 `charge`를 보지 않는다.
 //!   정산이 없거나 낡았으면 아예 만들지 않는다.
 //!
@@ -18,7 +18,6 @@ use crate::domain::{parse_grades, Fund};
 use crate::error::{AppError, AppResult};
 use crate::model::{CostItem, Proposal, ProposalColumn, ProposalKind, ProposalRow};
 use crate::repo;
-use crate::repo::enrollment::dept_label;
 
 /// 품의 열 차례 — 요구사항 §6의 표 그대로.
 ///
@@ -173,13 +172,16 @@ pub fn build(
         .map(|(i, _)| format!("?{}", i + 2))
         .collect::<Vec<_>>()
         .join(", ");
+    // 부서명 하나로 묶는다 — `로봇과학A반`과 `로봇과학B반`이 품의에서는 한 줄이다.
+    // 반을 가르는 것은 부서정보·수강생 명단의 일이고, 품의는 학교 회계 단위인
+    // 부서명으로 올린다. 원본 `department` 행은 그대로 둔다.
     let sql = format!(
-        "SELECT a.department_id, d.name, d.class_name, a.fund, SUM(a.amount)
+        "SELECT d.name, MIN(a.department_id), a.fund, SUM(a.amount)
            FROM settlement_alloc a
            JOIN department d ON d.id = a.department_id
           WHERE a.settlement_id = ?1 AND a.item_code IN ({placeholders})
-          GROUP BY a.department_id, a.fund
-          ORDER BY d.name, d.class_name, a.department_id"
+          GROUP BY d.name, a.fund
+          ORDER BY d.name"
     );
 
     let mut args: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(settlement_id)];
@@ -192,34 +194,38 @@ pub fn build(
     let raw = st
         .query_map(refs.as_slice(), |r| {
             Ok((
-                r.get::<_, i64>(0)?,
-                r.get::<_, String>(1)?,
+                r.get::<_, String>(0)?,
+                r.get::<_, i64>(1)?,
                 r.get::<_, String>(2)?,
-                r.get::<_, String>(3)?,
-                r.get::<_, i64>(4)?,
+                r.get::<_, i64>(3)?,
             ))
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     drop(st);
 
-    // 부서별로 모은다. 재원 구분은 `fund`만 본다 (요구사항 §8).
-    let mut order: Vec<i64> = Vec::new();
-    let mut labels: HashMap<i64, String> = HashMap::new();
-    let mut cells: HashMap<(i64, String), i64> = HashMap::new();
-    for (dept_id, name, class_name, fund, amount) in raw {
-        if !labels.contains_key(&dept_id) {
-            order.push(dept_id);
-            labels.insert(dept_id, dept_label(&name, &class_name));
+    // 부서명별로 모은다. 재원 구분은 `fund`만 본다 (요구사항 §8).
+    let mut order: Vec<String> = Vec::new();
+    let mut first_id: HashMap<String, i64> = HashMap::new();
+    let mut cells: HashMap<(String, String), i64> = HashMap::new();
+    for (name, dept_id, fund, amount) in raw {
+        if !first_id.contains_key(&name) {
+            order.push(name.clone());
+            first_id.insert(name.clone(), dept_id);
         }
-        *cells.entry((dept_id, fund)).or_insert(0) += amount;
+        *cells.entry((name, fund)).or_insert(0) += amount;
     }
 
     let mut rows: Vec<ProposalRow> = Vec::new();
     let mut total_amounts = vec![0i64; cols.len()];
-    for dept_id in order {
+    for name in order {
         let amounts: Vec<i64> = cols
             .iter()
-            .map(|c| cells.get(&(dept_id, c.fund.clone())).copied().unwrap_or(0))
+            .map(|c| {
+                cells
+                    .get(&(name.clone(), c.fund.clone()))
+                    .copied()
+                    .unwrap_or(0)
+            })
             .collect();
         let total: i64 = amounts.iter().sum();
         if total == 0 {
@@ -229,8 +235,10 @@ pub fn build(
             total_amounts[i] += v;
         }
         rows.push(ProposalRow {
-            department_id: dept_id,
-            dept_label: labels.remove(&dept_id).unwrap_or_default(),
+            // 부서명으로 묶었으므로 이 값은 그 묶음의 대표 부서 id 다.
+            // 화면에서 줄을 가리는 열쇠로만 쓰고, 부서를 지목하는 데는 쓰지 않는다.
+            department_id: first_id.get(&name).copied().unwrap_or(0),
+            dept_label: name,
             amounts,
             total,
         });

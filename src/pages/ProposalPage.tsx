@@ -1,7 +1,10 @@
 /**
  * 품의 양식 받기 (요구사항 §6~§12).
  *
- * 품의는 **학생별이 아니라 부서별 집계**다. 인원수 열은 없다.
+ * 품의는 **학생별이 아니라 부서명별 집계**다. 인원수 열은 없다.
+ *
+ * 같은 부서명의 여러 반(로봇과학A반·로봇과학B반)은 **한 줄로 합친다** — 학교 회계가
+ * 부서명 단위로 움직이기 때문이다. 부서정보와 수강생 명단에서는 반이 그대로 갈린다.
  *
  * 화면의 미리보기와 Excel은 **같은 집계 결과**를 쓴다. 화면에서 본 금액과
  * 파일의 금액이 다를 수 없다는 뜻이다.
@@ -72,7 +75,8 @@ export function ProposalPage() {
         <div>
           <h1 className="page__title">품의 양식 받기</h1>
           <p className="page__desc">
-            부서별 재원 집계입니다. 학생 이름과 인원수는 들어가지 않습니다.
+            부서명별 재원 집계입니다. 같은 부서명의 여러 반은 한 줄로 합칩니다. 학생 이름과
+            인원수는 들어가지 않습니다.
           </p>
         </div>
         <div className="page__actions">
@@ -225,22 +229,6 @@ export function ProposalPage() {
                   <span style={{ color: 'var(--red-600)' }}>✕ 정산 결과와 어긋납니다</span>
                 )}
               </span>
-            </div>
-          </Card>
-
-          <Card title="열 이름은 어떻게 정해지는가">
-            <div className="hint" style={{ lineHeight: 1.9 }}>
-              열 이름은 <b>학년도 지원금 설정의 대상학년</b>에서 만들어집니다. 내부적으로는
-              학년을 모르는 재원 코드({p.columns.map((c) => c.fund).join(' · ')})로만 계산하고,
-              이름표는 출력할 때만 붙입니다. 대상학년을 3학년에서 3·4학년으로 바꾸면 이름표가
-              저절로 따라 바뀝니다.
-              <div style={{ marginTop: 8 }}>
-                {p.columns.map((c) => (
-                  <div key={c.fund}>
-                    · <b>{c.label}</b> ← {c.fund}
-                  </div>
-                ))}
-              </div>
             </div>
           </Card>
         </>
