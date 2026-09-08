@@ -10,6 +10,7 @@ import { useState } from 'react'
 
 import { ApplyFeesModal } from '@/components/ApplyFeesModal'
 import { cmp, DataTable, type Column } from '@/components/DataTable'
+import { DeptFeeExcel } from '@/components/DeptFeeExcel'
 import { ExcelTools } from '@/components/ExcelTools'
 import { Confirm, Modal } from '@/components/Modal'
 import { StudentFeesModal } from '@/components/StudentFeesModal'
@@ -144,6 +145,11 @@ export function DepartmentsPage() {
         여기 금액은 <b>기준</b> 수강료입니다. 이미 등록된 수강생의 금액은 자동으로 바뀌지
         않습니다 — 부서를 고른 뒤 <b>[학생별 수정]</b>으로 한 명씩 고치거나,{' '}
         <b>[부서금액 반영]</b>으로 무엇이 바뀌는지 확인한 뒤 반영합니다.
+        <div className="hint" style={{ marginTop: 6 }}>
+          여러 학생을 한꺼번에 고칠 때는 <b>[금액 수정 양식 받기]</b>로 지금 금액을 받아
+          고친 뒤 <b>[금액 수정 파일 불러오기]</b>로 올립니다. 파일에 적은 학생만 바뀌고,
+          반영 전에 무엇이 어떻게 바뀌는지 먼저 보여 줍니다.
+        </div>
       </Notice>
 
       <Card
@@ -170,6 +176,11 @@ export function DepartmentsPage() {
             >
               학생별 수정
             </Button>
+            <DeptFeeExcel
+              workspaceId={wsId!}
+              dept={one}
+              onDone={() => void qc.invalidateQueries()}
+            />
             <Button
               small
               onClick={() => setApplyFor(one ?? 'all')}

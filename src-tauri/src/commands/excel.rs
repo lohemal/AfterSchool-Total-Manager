@@ -9,7 +9,7 @@ use tauri::State;
 
 use crate::db::Db;
 use crate::error::{AppError, AppResult};
-use crate::excel::{self, ExportResult, ImportPreview, ImportResult, RowIssue, Stage};
+use crate::excel::{self, ExportResult, ImportPreview, ImportResult, RowIssue, Stage, Staged};
 use crate::model::{EnrollmentFilter, StudentFilter};
 use crate::repo;
 
@@ -137,6 +137,80 @@ pub fn excel_export_issues(
     headers: Vec<String>,
 ) -> AppResult<ExportResult> {
     excel::export_issues(&issues, &headers, &db.export_dir())
+}
+
+// ─────────────────────────────────── 부서별 금액 Excel 수정 (v0.1.4)
+
+/// 고른 부서의 지금 수강생·지금 금액을 양식으로 낸다.
+#[tauri::command]
+pub fn dept_fee_template(
+    db: State<'_, Db>,
+    workspace_id: i64,
+    department_id: i64,
+) -> AppResult<ExportResult> {
+    let dir = db.export_dir();
+    db.read(|c| {
+        let items = repo::cost_items(c)?;
+        let ws = repo::year::get_workspace(c, workspace_id)?;
+        let year = repo::year::get_year(c, ws.year_id)?;
+        let scope = [year.name.as_str(), ws.name.as_str()];
+        excel::dept_fees::template(c, workspace_id, department_id, &items, &scope, &dir)
+    })
+}
+
+/// 파일을 읽어 무엇이 어떻게 바뀌는지 보여 준다. **DB는 건드리지 않는다.**
+///
+/// 오류가 하나라도 있으면 `token`을 만들지 않는다 — 절반만 반영되는 일이
+/// 없어야 하기 때문이다.
+#[tauri::command]
+pub fn dept_fee_preview(
+    db: State<'_, Db>,
+    stage: State<'_, Stage>,
+    workspace_id: i64,
+    department_id: i64,
+    path: String,
+) -> AppResult<crate::model::FeePreview> {
+    let file = PathBuf::from(&path);
+    if !file.exists() {
+        return Err(AppError::invalid("선택한 파일을 찾지 못했습니다."));
+    }
+    let (mut preview, edits) = db.read(|c| {
+        let items = repo::cost_items(c)?;
+        excel::dept_fees::preview(c, workspace_id, department_id, &items, &file)
+    })?;
+
+    if preview.errors.is_empty() && !edits.is_empty() {
+        preview.token = stage.put(Staged::DeptFees {
+            department_id,
+            edits,
+        })?;
+    }
+    Ok(preview)
+}
+
+/// 미리보기에서 확인한 변경만 한 트랜잭션으로 쓴다.
+#[tauri::command]
+pub fn dept_fee_apply(
+    db: State<'_, Db>,
+    stage: State<'_, Stage>,
+    workspace_id: i64,
+    token: String,
+    reason: String,
+) -> AppResult<crate::model::FeeApplyResult> {
+    let staged = stage.take(&token)?;
+    let Staged::DeptFees {
+        department_id,
+        edits,
+    } = staged
+    else {
+        return Err(AppError::invalid(
+            "금액 수정 자료가 아닙니다. 파일을 다시 불러와 주세요.",
+        ));
+    };
+    db.write(|c| {
+        let items = repo::cost_items(c)?;
+        excel::dept_fees::apply(c, workspace_id, department_id, &edits, &reason, &items)
+    })
 }
 
 /// 학생별 징수 내역 내려받기 (행정자료, v0.1.3).

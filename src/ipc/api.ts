@@ -43,6 +43,8 @@ import type {
   ProgramRow,
   RestoreReport,
   RowIssue,
+  FeeApplyResult,
+  FeePreview,
   SelfPayReport,
   SettleExportKind,
   SettlementStatus,
@@ -283,6 +285,14 @@ export const api = {
   /** 화면 필터를 그대로 반영해 내려받는다. `cond`는 파일에 적히는 조건 문구. */
   feeReportExport: (workspaceId: number, filter: EnrollmentFilter, cond: string) =>
     invoke<ExportResult>('fee_report_export', { workspaceId, filter, cond }),
+
+  // ── 부서별 금액 Excel 수정 (v0.1.4)
+  deptFeeTemplate: (workspaceId: number, departmentId: number) =>
+    invoke<ExportResult>('dept_fee_template', { workspaceId, departmentId }),
+  deptFeePreview: (workspaceId: number, departmentId: number, path: string) =>
+    invoke<FeePreview>('dept_fee_preview', { workspaceId, departmentId, path }),
+  deptFeeApply: (workspaceId: number, token: string, reason: string) =>
+    invoke<FeeApplyResult>('dept_fee_apply', { workspaceId, token, reason }),
 
   excelCommit: (token: string, yearId: number, workspaceId?: number | null) =>
     invoke<ImportResult>('excel_commit', { token, yearId, workspaceId: workspaceId ?? null }),

@@ -142,6 +142,9 @@ pub fn run() {
             commands::excel::excel_export,
             commands::excel::excel_export_issues,
             commands::excel::fee_report_export,
+            commands::excel::dept_fee_template,
+            commands::excel::dept_fee_preview,
+            commands::excel::dept_fee_apply,
         ])
         .run(tauri::generate_context!())
         .expect("앱을 시작하지 못했습니다");

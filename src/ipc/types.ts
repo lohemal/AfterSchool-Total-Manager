@@ -592,3 +592,43 @@ export interface SelfPayReport {
   fees: Fee[]
   total: number
 }
+
+/**
+ * 부서별 금액 Excel 수정 (v0.1.4).
+ *
+ * 파일이 곧바로 DB를 바꾸지 않는다. 먼저 무엇이 어떻게 바뀌는지 보여 주고,
+ * 사람이 [변경사항 반영]을 눌렀을 때만 한 트랜잭션으로 쓴다.
+ */
+export interface FeeChange {
+  enrollmentId: number
+  studentLabel: string
+  itemCode: string
+  itemName: string
+  before: number
+  after: number
+}
+
+export interface FeeRowIssue {
+  line: number
+  label: string
+  message: string
+}
+
+export interface FeePreview {
+  /** 반영에 쓸 열쇠. 오류가 있거나 바뀔 것이 없으면 빈 문자열이다 */
+  token: string
+  fileName: string
+  deptLabel: string
+  total: number
+  students: number
+  cells: number
+  unchanged: number
+  unmatched: FeeRowIssue[]
+  errors: FeeRowIssue[]
+  changes: FeeChange[]
+}
+
+export interface FeeApplyResult {
+  students: number
+  cells: number
+}

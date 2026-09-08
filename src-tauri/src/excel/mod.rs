@@ -8,6 +8,7 @@
 //! 오류가 있는 줄 때문에 정상 줄까지 버리지 않는다 (§28).
 
 pub mod admin;
+pub mod dept_fees;
 pub mod read;
 pub mod write;
 
@@ -80,6 +81,11 @@ pub enum Staged {
     },
     Departments(Vec<DepartmentRow>),
     Enrollments(Vec<EnrollmentRow>),
+    /// 부서별 금액 수정 — 어느 부서의 것인지 함께 둔다 (v0.1.4).
+    DeptFees {
+        department_id: i64,
+        edits: Vec<crate::repo::enrollment::StudentFeeEdit>,
+    },
 }
 
 #[derive(Default)]
@@ -642,6 +648,12 @@ pub fn commit(
             let (added, skipped) = repo::enrollment::create_bulk(conn, ws, &rows, &items)?;
             (added, skipped)
         }
+        // 부서별 금액 수정은 변경사유를 함께 받아야 하므로 전용 명령으로 쓴다.
+        Staged::DeptFees { .. } => {
+            return Err(AppError::invalid(
+                "금액 수정은 [변경사항 반영]으로 처리합니다.",
+            ))
+        }
     };
     Ok(ImportResult { added, updated })
 }
@@ -859,6 +871,10 @@ mod roundtrip_tests;
 #[cfg(test)]
 #[path = "class_no_tests.rs"]
 mod class_no_tests;
+
+#[cfg(test)]
+#[path = "dept_fees_tests.rs"]
+mod dept_fees_tests;
 
 /// 학생별 징수 내역 (행정자료).
 ///

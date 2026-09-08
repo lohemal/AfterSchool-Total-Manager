@@ -19,6 +19,17 @@ pub struct DepartmentRow {
     pub fees: Vec<Fee>,
 }
 
+/// 부서 이름표만 필요한 곳에서 쓴다 (`로봇과학`, `A반`).
+pub fn name_of(conn: &Connection, department_id: i64) -> AppResult<(String, String)> {
+    conn.query_row(
+        "SELECT name, class_name FROM department WHERE id = ?1",
+        params![department_id],
+        |r| Ok((r.get(0)?, r.get(1)?)),
+    )
+    .optional()?
+    .ok_or_else(|| crate::error::AppError::not_found("부서를 찾지 못했습니다."))
+}
+
 pub fn list(conn: &Connection, workspace_id: i64, query: Option<&str>) -> AppResult<Vec<Department>> {
     let like = query
         .map(|q| q.trim())

@@ -656,3 +656,71 @@ pub struct SelfPayReport {
     pub fees: Vec<Fee>,
     pub total: i64,
 }
+
+// ─────────────────────────────────────────────── 부서별 금액 Excel 수정 (v0.1.4)
+//
+// 부서 하나를 고른 뒤 그 부서 수강생의 금액을 Excel로 한꺼번에 고친다.
+//
+// **파일이 곧바로 DB를 바꾸지 않는다.** 먼저 무엇이 어떻게 바뀌는지 보여 주고,
+// 사람이 [변경사항 반영]을 눌렀을 때만 한 트랜잭션으로 쓴다.
+
+/// 실제로 바뀌는 칸 하나. 값이 같은 칸은 여기 들어오지 않는다.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FeeChange {
+    pub enrollment_id: i64,
+    /// `1학년 가람반 3번 홍길동`
+    pub student_label: String,
+    pub item_code: String,
+    pub item_name: String,
+    pub before: i64,
+    pub after: i64,
+}
+
+/// 반영하지 않는 줄과 그 까닭.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FeeRowIssue {
+    /// Excel 화면의 행 번호
+    pub line: usize,
+    /// 파일에 적혀 있던 대로의 학생 표시
+    pub label: String,
+    pub message: String,
+}
+
+/// 반영 전 미리보기.
+///
+/// 검증은 **파일 전체**를 먼저 본다. 오류가 있으면 `token`이 비어 있고 아무것도
+/// 반영할 수 없다 — 절반만 들어가는 일이 없어야 하기 때문이다.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FeePreview {
+    /// 반영에 쓸 열쇠. 오류가 있으면 빈 문자열이다.
+    pub token: String,
+    pub file_name: String,
+    /// `로봇과학A반`
+    pub dept_label: String,
+    /// 파일에서 읽은 자료 줄 수
+    pub total: i64,
+    /// 금액이 실제로 바뀌는 학생 수
+    pub students: i64,
+    /// 바뀌는 칸 수
+    pub cells: i64,
+    /// 찾았지만 값이 같아 바뀌지 않는 학생 수
+    pub unchanged: i64,
+    /// 이 부서에서 찾지 못한 줄
+    pub unmatched: Vec<FeeRowIssue>,
+    /// 형식이 잘못된 줄
+    pub errors: Vec<FeeRowIssue>,
+    pub changes: Vec<FeeChange>,
+}
+
+/// 반영 결과.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FeeApplyResult {
+    /// 금액이 바뀐 학생 수
+    pub students: i64,
+    /// 바뀐 칸 수
+    pub cells: i64,
+}
