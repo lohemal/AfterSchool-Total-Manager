@@ -324,6 +324,25 @@
   line-height: 1.6;
 }
 
+/*
+ * 두 칸을 나란히 두는 줄 — 이름표끼리, 입력칸끼리 높이를 맞춘다.
+ *
+ * `.toolbar` 는 `align-items: flex-end` 라 칸마다 높이가 다르면(예: 한쪽에만
+ * 설명이 붙으면) 바닥을 맞추느라 그 칸이 통째로 위로 밀린다. 여기서는 격자로
+ * 놓고 위를 맞춰, 설명은 줄 **바깥**에 둔다.
+ */
+.formRow {
+  display: grid;
+  grid-template-columns: 170px minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+}
+
+.formRow > .field > .input,
+.formRow > .field > .select {
+  width: 100%;
+}
+
 /* ─────────────────────────────────────────── 버튼 */
 
 .btn {

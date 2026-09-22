@@ -70,23 +70,28 @@ export function AdjustmentToggle({
       {on && (
         <>
           {children}
-          <div className="toolbar" style={{ marginTop: 10 }}>
+          {/*
+           * 이름표끼리·입력칸끼리 높이를 맞춘다. 설명을 `Field` 안에 넣으면 그
+           * 칸만 키가 커져서 줄이 어긋나므로 줄 아래에 따로 둔다.
+           */}
+          <div className="formRow" style={{ marginTop: 10 }}>
             <Field label="발생일">
               <Input
                 type="date"
                 value={occurredOn}
                 onChange={(e) => setOccurredOn(e.target.value)}
-                style={{ width: 160 }}
               />
             </Field>
-            <Field label="사유 · 메모" hint="추가·취소 관리 상세에 남습니다.">
+            <Field label="사유 · 메모">
               <Input
                 value={note}
                 onChange={(e) => setNote(e.target.value)}
                 placeholder="선택 입력"
-                style={{ width: 260 }}
               />
             </Field>
+          </div>
+          <div className="hint" style={{ marginTop: 6 }}>
+            사유·메모는 추가·취소 관리 상세에 남습니다.
           </div>
         </>
       )}
