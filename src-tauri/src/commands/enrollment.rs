@@ -51,15 +51,28 @@ pub fn department_base_fees(db: State<'_, Db>, department_id: i64) -> AppResult<
     db.read(|c| repo::department::fees_of(c, department_id))
 }
 
+/// 수강 수기 추가.
+///
+/// `adjustment` 를 주면 이 수강 건을 **추가징수 대상**으로 함께 등록한다
+/// (v0.1.5). 프로그램이 등록일만 보고 스스로 정하지 않는다 — 최초 징수 전에
+/// 넣는 학생도 있기 때문이다.
+///
+/// `db.write` 하나로 감싸므로 수강·금액·추가징수 기록이 **함께 남거나 함께
+/// 되돌아간다.**
 #[tauri::command]
 pub fn enrollment_create(
     db: State<'_, Db>,
     workspace_id: i64,
     input: EnrollmentInput,
+    adjustment: Option<crate::model::AdjustmentInput>,
 ) -> AppResult<i64> {
     db.write(|c| {
         let items = repo::cost_items(c)?;
-        repo::enrollment::create(c, workspace_id, &input, &items)
+        let id = repo::enrollment::create(c, workspace_id, &input, &items)?;
+        if let Some(adj) = adjustment.as_ref() {
+            repo::adjustment::create_additional(c, id, adj, &items)?;
+        }
+        Ok(id)
     })
 }
 
@@ -79,7 +92,15 @@ pub fn enrollment_update_fees(
 
 /// 수강 취소. `fees`를 주면 최종 징수금액을 함께 확정한다 (v0.1.3).
 ///
-/// `db.write`가 트랜잭션을 감싸므로 금액·상태·이력이 함께 커밋되거나
+/// `adjustment` 를 주면 **환불 대상**으로 함께 등록한다 (v0.1.5).
+/// 환불액은 `취소 직전 금액 - 취소 후 최종 금액`이고, 그 '취소 직전'은 취소가
+/// 끝나면 다시 구할 수 없으므로 **여기서 먼저 떠 둔다.**
+///
+/// 어느 항목이든 환불액이 음수가 되면 `create_refund` 가 오류를 내고, 트랜잭션
+/// 전체가 되돌아가 **취소도 일어나지 않는다.** 금액을 고치거나 [환불 대상]
+/// 체크를 풀면 기존과 똑같이 취소된다 — 취소 기능 자체의 허용 범위는 그대로다.
+///
+/// `db.write`가 트랜잭션을 감싸므로 금액·상태·이력·환불기록이 함께 커밋되거나
 /// 함께 되돌아간다.
 #[tauri::command]
 pub fn enrollment_cancel(
@@ -87,10 +108,16 @@ pub fn enrollment_cancel(
     id: i64,
     fees: Option<Vec<Fee>>,
     reason: String,
+    adjustment: Option<crate::model::AdjustmentInput>,
 ) -> AppResult<()> {
     db.write(|c| {
         let items = repo::cost_items(c)?;
-        repo::enrollment::cancel(c, id, fees.as_deref(), &reason, &items)
+        let before = repo::enrollment::get(c, id, &items)?;
+        repo::enrollment::cancel(c, id, fees.as_deref(), &reason, &items)?;
+        if let Some(adj) = adjustment.as_ref() {
+            repo::adjustment::create_refund(c, id, &before, adj, &items)?;
+        }
+        Ok(())
     })
 }
 
@@ -230,4 +257,48 @@ pub fn fee_report(
         let items = repo::cost_items(c)?;
         repo::fee_report::build(c, workspace_id, &items, &filter)
     })
+}
+
+// ─────────────────────────────────── 추가징수 · 환불 (v0.1.5)
+
+/// 추가·취소 관리 두 탭.
+#[tauri::command]
+pub fn adjustment_view(
+    db: State<'_, Db>,
+    workspace_id: i64,
+    filter: crate::model::AdjustmentFilter,
+) -> AppResult<crate::model::AdjustmentView> {
+    db.read(|c| {
+        let items = repo::cost_items(c)?;
+        repo::adjustment::view(c, workspace_id, &filter, &items)
+    })
+}
+
+/// 사이드바 배지 — 작업공간 전체의 확인 필요 건수.
+#[tauri::command]
+pub fn adjustment_needs_check(db: State<'_, Db>, workspace_id: i64) -> AppResult<i64> {
+    db.read(|c| repo::adjustment::needs_check_count(c, workspace_id))
+}
+
+/// 원본이 달라진 칸 목록 — [변경내역 확인] 화면.
+#[tauri::command]
+pub fn adjustment_diffs(
+    db: State<'_, Db>,
+    workspace_id: i64,
+) -> AppResult<Vec<crate::model::AdjustmentDiff>> {
+    db.read(|c| {
+        let items = repo::cost_items(c)?;
+        repo::adjustment::diffs(c, workspace_id, &items)
+    })
+}
+
+/// `mode`: `KEEP`(기존 금액 유지) | `APPLY`(현재 금액 반영).
+#[tauri::command]
+pub fn adjustment_confirm(db: State<'_, Db>, ids: Vec<i64>, mode: String) -> AppResult<i64> {
+    db.write(|c| repo::adjustment::confirm(c, &ids, &mode))
+}
+
+#[tauri::command]
+pub fn adjustment_delete(db: State<'_, Db>, ids: Vec<i64>) -> AppResult<usize> {
+    db.write(|c| repo::adjustment::delete_many(c, &ids))
 }

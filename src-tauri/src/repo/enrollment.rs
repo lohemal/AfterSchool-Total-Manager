@@ -1149,6 +1149,7 @@ pub fn active_exists(
 ///
 /// 취소 상태까지 함께 사라지므로 **명령 계층에서 자동백업을 남긴 뒤**에만 부른다.
 pub fn delete_all(conn: &Connection, workspace_id: i64) -> AppResult<usize> {
+    crate::repo::adjustment::block_for_workspace(conn, workspace_id)?;
     let n = conn.execute(
         "DELETE FROM enrollment WHERE workspace_id = ?1",
         params![workspace_id],

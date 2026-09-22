@@ -19,6 +19,8 @@ import type {
   StudentFilter,
 } from '@/ipc/types'
 
+import { saveExport } from '@/lib/saveFile'
+
 import { Modal } from './Modal'
 import { useToast } from './Toast'
 import { Button } from './ui'
@@ -47,15 +49,7 @@ export function ExcelTools({
   const [busy, setBusy] = useState(false)
 
   async function template() {
-    try {
-      const r = await api.excelTemplate(kind)
-      toast.ok(`${r.name} 을(를) 만들었습니다.`, {
-        label: '폴더 열기',
-        run: () => void api.openFolder('exports'),
-      })
-    } catch (e) {
-      toast.bad(errorMessage(e))
-    }
+    await saveExport(() => api.excelTemplate(kind), toast)
   }
 
   async function pick() {
@@ -91,28 +85,16 @@ export function ExcelTools({
   }
 
   async function download() {
-    try {
-      const r = await api.excelExport({ kind, yearId, workspaceId, program, filter, enrollmentFilter })
-      toast.ok(`${r.name} (${r.rows}건) 을(를) 만들었습니다.`, {
-        label: '폴더 열기',
-        run: () => void api.openFolder('exports'),
-      })
-    } catch (e) {
-      toast.bad(errorMessage(e))
-    }
+    await saveExport(
+      () => api.excelExport({ kind, yearId, workspaceId, program, filter, enrollmentFilter }),
+      toast,
+      (r) => `${r.rows}건`,
+    )
   }
 
   async function downloadIssues(issues: RowIssue[]) {
     if (!preview) return
-    try {
-      const r = await api.excelExportIssues(issues, preview.headers)
-      toast.ok(`${r.name} 을(를) 만들었습니다.`, {
-        label: '폴더 열기',
-        run: () => void api.openFolder('exports'),
-      })
-    } catch (e) {
-      toast.bad(errorMessage(e))
-    }
+    await saveExport(() => api.excelExportIssues(issues, preview.headers), toast)
   }
 
   return (

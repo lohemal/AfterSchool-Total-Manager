@@ -108,6 +108,7 @@ pub fn update_year(conn: &Connection, id: i64, name: &str, start: &str, end: &st
 }
 
 pub fn delete_year(conn: &Connection, id: i64) -> AppResult<()> {
+    crate::repo::adjustment::block_for_year(conn, id)?;
     conn.execute("DELETE FROM academic_year WHERE id = ?1", params![id])?;
     // 현재 학년도가 사라졌으면 가장 최근 학년도를 현재로 만든다.
     if current_year(conn)?.is_none() {
@@ -284,6 +285,7 @@ pub fn update_workspace(conn: &Connection, id: i64, input: &WorkspaceInput) -> A
 }
 
 pub fn delete_workspace(conn: &Connection, id: i64) -> AppResult<()> {
+    crate::repo::adjustment::block_for_workspace(conn, id)?;
     let n = conn.execute("DELETE FROM workspace WHERE id = ?1", params![id])?;
     if n == 0 {
         return Err(AppError::not_found("작업공간을 찾지 못했습니다."));

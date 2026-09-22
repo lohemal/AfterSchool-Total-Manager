@@ -14,6 +14,8 @@ import type { Department, Enrollment, Fee } from '@/ipc/types'
 import { won } from '@/lib/format'
 import { useApp } from '@/lib/useApp'
 
+import { AdjustmentToggle, adjustmentOf, todayISO } from './AdjustmentToggle'
+
 import { Modal } from './Modal'
 import { StudentPicker } from './StudentPicker'
 import { useToast } from './Toast'
@@ -48,6 +50,12 @@ export function EnrollmentModal({
   const [reason, setReason] = useState('')
   const [touched, setTouched] = useState(false)
 
+  // 추가징수 대상 (v0.1.5). 새로 추가할 때만 쓴다 — 금액만 고치는 것은
+  // 최초 징수 이후의 행정처리가 아니다.
+  const [addCharge, setAddCharge] = useState(false)
+  const [occurredOn, setOccurredOn] = useState(todayISO())
+  const [adjNote, setAdjNote] = useState('')
+
   // 부서를 고르면 그 부서의 기준 수강료를 불러와 보여 준다.
   const base = useQuery({
     queryKey: ['dept-base-fees', departmentId],
@@ -78,15 +86,20 @@ export function EnrollmentModal({
       }
       if (!studentId) throw { code: 'INVALID', message: '학생을 골라 주세요.' }
       if (!departmentId) throw { code: 'INVALID', message: '부서를 골라 주세요.' }
-      await api.enrollmentCreate(app.workspaceId!, {
-        studentId,
-        departmentId,
-        fees,
-        reason: reason || undefined,
-      })
+      await api.enrollmentCreate(
+        app.workspaceId!,
+        { studentId, departmentId, fees, reason: reason || undefined },
+        adjustmentOf(addCharge, occurredOn, adjNote),
+      )
     },
     onSuccess: () => {
-      toast.ok(value ? '금액을 저장했습니다.' : '수강을 등록했습니다.')
+      toast.ok(
+        value
+          ? '금액을 저장했습니다.'
+          : addCharge
+            ? '수강을 등록하고 추가징수 대상으로 넣었습니다.'
+            : '수강을 등록했습니다.',
+      )
       onSaved()
     },
     onError: (e) => toast.bad(errorMessage(e)),
@@ -219,6 +232,27 @@ export function EnrollmentModal({
           onChange={(e) => setReason(e.target.value)}
         />
       </Field>
+
+      {!value && (
+        <AdjustmentToggle
+          label="추가징수 대상"
+          hint={
+            <>
+              이미 이 기간 수강료를 걷은 뒤에 들어온 학생이면 체크하세요. 위에 적은 금액{' '}
+              <b>{won(total)}원</b>이 [수강 관리 › 추가·취소 관리]의 추가징수로 남습니다.
+              <br />
+              최초 징수 전에 넣는 학생이면 체크하지 않습니다 — 프로그램이 등록일만 보고
+              스스로 정하지 않습니다.
+            </>
+          }
+          on={addCharge}
+          setOn={setAddCharge}
+          occurredOn={occurredOn}
+          setOccurredOn={setOccurredOn}
+          note={adjNote}
+          setNote={setAdjNote}
+        />
+      )}
     </Modal>
   )
 }

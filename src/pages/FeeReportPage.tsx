@@ -25,16 +25,17 @@
  * 읽기 전용이다. 금액 수정은 수강생 명단이나 부서정보에서 한다.
  */
 
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery } from '@tanstack/react-query'
 import { useMemo, useState } from 'react'
 
 import { cmp, DataTable, type Column } from '@/components/DataTable'
 import { Modal } from '@/components/Modal'
 import { useToast } from '@/components/Toast'
 import { Button, Card, Empty, Field, Notice, Search, Select } from '@/components/ui'
-import { api, errorMessage } from '@/ipc/api'
+import { api } from '@/ipc/api'
 import type { Enrollment, EnrollmentFilter, StudentSumRow } from '@/ipc/types'
 import { compareClassNo, studentLabel, supportLabel, won } from '@/lib/format'
+import { saveExport } from '@/lib/saveFile'
 import { useApp } from '@/lib/useApp'
 
 /**
@@ -62,7 +63,6 @@ export function condText(f: {
 
 export function FeeReportPage() {
   const app = useApp()
-  const qc = useQueryClient()
   const toast = useToast()
   const items = app.boot.costItems
   const wsId = app.workspaceId
@@ -118,12 +118,8 @@ export function FeeReportPage() {
   const cond = condText({ grade, classNo, deptLabel, status, query })
 
   const download = useMutation({
-    mutationFn: () => api.feeReportExport(wsId!, filter, cond),
-    onSuccess: (r) => {
-      toast.ok(`${r.name} (학생 ${r.rows}명)을 만들었습니다.`)
-      void qc.invalidateQueries()
-    },
-    onError: (e) => toast.bad(errorMessage(e)),
+    mutationFn: () =>
+      saveExport(() => api.feeReportExport(wsId!, filter, cond), toast, (r) => `학생 ${r.rows}명`),
   })
 
   function reset() {

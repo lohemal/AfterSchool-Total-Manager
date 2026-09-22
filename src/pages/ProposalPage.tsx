@@ -20,6 +20,7 @@ import { useToast } from '@/components/Toast'
 import { Button, Card, Empty, Field, Notice, Select } from '@/components/ui'
 import { api, errorMessage } from '@/ipc/api'
 import { won } from '@/lib/format'
+import { saveExport } from '@/lib/saveFile'
 import { useApp } from '@/lib/useApp'
 
 export function ProposalPage() {
@@ -42,14 +43,8 @@ export function ProposalPage() {
   })
 
   const download = useMutation({
-    mutationFn: () => api.proposalExport(wsId!, kind),
-    onSuccess: (r) => {
-      toast.ok(`${r.name} (부서 ${r.rows}줄) 을(를) 만들었습니다.`, {
-        label: '폴더 열기',
-        run: () => void api.openFolder('exports'),
-      })
-    },
-    onError: (e) => toast.bad(errorMessage(e)),
+    mutationFn: () =>
+      saveExport(() => api.proposalExport(wsId!, kind), toast, (r) => `부서 ${r.rows}줄`),
   })
 
   if (wsId === null) {

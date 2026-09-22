@@ -170,6 +170,8 @@ pub fn update(conn: &Connection, id: i64, input: &StudentInput) -> AppResult<()>
 }
 
 pub fn delete_many(conn: &Connection, ids: &[i64]) -> AppResult<usize> {
+    // 돈이 오간 기록이 딸려 있으면 지우지 않는다 (설계안 26-7).
+    crate::repo::adjustment::block_for_students(conn, ids)?;
     let mut n = 0;
     for id in ids {
         n += conn.execute("DELETE FROM student WHERE id = ?1", params![id])?;
@@ -178,6 +180,7 @@ pub fn delete_many(conn: &Connection, ids: &[i64]) -> AppResult<usize> {
 }
 
 pub fn delete_all(conn: &Connection, year_id: i64) -> AppResult<usize> {
+    crate::repo::adjustment::block_for_year(conn, year_id)?;
     Ok(conn.execute("DELETE FROM student WHERE year_id = ?1", params![year_id])?)
 }
 

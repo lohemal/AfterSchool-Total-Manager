@@ -17,10 +17,12 @@ import { useState } from 'react'
 
 import { Modal } from '@/components/Modal'
 import { useToast } from '@/components/Toast'
-import { Button, Field, Input, NumInput } from '@/components/ui'
+import { Button, Field, Input, Notice, NumInput } from '@/components/ui'
 import { api, errorMessage } from '@/ipc/api'
 import type { CostItem, Enrollment, Fee } from '@/ipc/types'
 import { won } from '@/lib/format'
+
+import { AdjustmentToggle, adjustmentOf, todayISO } from './AdjustmentToggle'
 
 /** 숫자만 남긴다. 빈 칸은 0으로 본다. */
 function num(v: string): number {
@@ -59,10 +61,30 @@ export function CancelModal({
     amount: draft[it.code] ?? 0,
   }))
 
+  // 환불 대상 (v0.1.5). 환불액 = 취소 직전 금액 - 취소 후 최종 금액.
+  const [refund, setRefund] = useState(false)
+  const [occurredOn, setOccurredOn] = useState(todayISO())
+  const [adjNote, setAdjNote] = useState('')
+
+  const 환불액 = (code: string) => before(code) - (draft[code] ?? 0)
+  const 환불합계 = items.reduce((s, it) => s + 환불액(it.code), 0)
+  // 취소 후 금액이 취소 전보다 큰 항목 — 환불액이 음수가 된다
+  const 음수 = items.filter((it) => 환불액(it.code) < 0)
+
   const act = useMutation({
-    mutationFn: () => api.enrollmentCancel(target.id, fees, reason.trim()),
+    mutationFn: () =>
+      api.enrollmentCancel(
+        target.id,
+        fees,
+        reason.trim(),
+        adjustmentOf(refund, occurredOn, adjNote),
+      ),
     onSuccess: () => {
-      toast.ok(`취소 처리되었습니다. 징수금액 ${won(afterTotal)}원`)
+      toast.ok(
+        refund
+          ? `취소 처리하고 환불 ${won(환불합계)}원을 등록했습니다.`
+          : `취소 처리되었습니다. 징수금액 ${won(afterTotal)}원`,
+      )
       onDone()
     },
     onError: (e) => toast.bad(errorMessage(e)),
@@ -78,9 +100,14 @@ export function CancelModal({
           <Button
             variant="danger"
             onClick={() => act.mutate()}
-            disabled={act.isPending || reason.trim() === ''}
+            disabled={act.isPending || reason.trim() === '' || (refund && 음수.length > 0)}
+            title={
+              refund && 음수.length > 0
+                ? '환불액이 음수가 되는 항목이 있습니다'
+                : undefined
+            }
           >
-            {act.isPending ? '처리 중…' : '취소 처리'}
+            {act.isPending ? '처리 중…' : refund ? '취소하고 환불 등록' : '취소 처리'}
           </Button>
         </>
       }
@@ -173,6 +200,74 @@ export function CancelModal({
         취소해도 자료를 지우지 않습니다. 되돌릴 수 있고, 변경이력에 남습니다.
         금액을 바꾸면 정산은 <b>재정산 필요</b>가 됩니다.
       </div>
+
+      <AdjustmentToggle
+        label="환불 대상"
+        hint={
+          <>
+            이미 이 기간 수강료를 걷은 뒤의 취소라서 <b>돌려줄 돈이 있으면</b> 체크하세요.
+            환불액은 <b>취소 직전 금액 − 취소 후 최종 징수금액</b>으로 프로그램이 셉니다.
+            <br />
+            아직 걷기 전이라면 체크하지 않습니다 — 취소만 처리됩니다.
+          </>
+        }
+        on={refund}
+        setOn={setRefund}
+        occurredOn={occurredOn}
+        setOccurredOn={setOccurredOn}
+        note={adjNote}
+        setNote={setAdjNote}
+      >
+        {음수.length > 0 ? (
+          <Notice tone="bad">
+            <b>{음수.map((it) => it.name).join(' · ')}</b>의 취소 후 금액이 취소 전보다 많아
+            환불액이 음수가 됩니다. 금액을 확인하시거나 [환불 대상] 체크를 풀어 주세요.
+            <div className="hint" style={{ marginTop: 4 }}>
+              체크를 풀면 지금까지처럼 취소만 처리됩니다.
+            </div>
+          </Notice>
+        ) : (
+          <div className="tableWrap" style={{ marginTop: 10 }}>
+            <table className="table">
+              <thead>
+                <tr>
+                  <th style={{ width: 90 }}>항목</th>
+                  <th className="num">취소 직전</th>
+                  <th className="num">취소 후 징수</th>
+                  <th className="num">환불액</th>
+                </tr>
+              </thead>
+              <tbody>
+                {items.map((it) => (
+                  <tr key={it.code}>
+                    <td>{it.name}</td>
+                    <td className="num">{won(before(it.code))}</td>
+                    <td className="num">{won(draft[it.code] ?? 0)}</td>
+                    <td className="num">
+                      <b>{won(환불액(it.code))}</b>
+                    </td>
+                  </tr>
+                ))}
+                <tr style={{ background: 'var(--blue-50)' }}>
+                  <td>
+                    <b>합계</b>
+                  </td>
+                  <td className="num">{won(beforeTotal)}</td>
+                  <td className="num">{won(afterTotal)}</td>
+                  <td className="num">
+                    <b style={{ color: 'var(--navy-800)' }}>{won(환불합계)}</b>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        )}
+        {환불합계 === 0 && 음수.length === 0 && (
+          <div className="hint" style={{ marginTop: 6 }}>
+            돌려줄 금액이 0원입니다. 그래도 기록으로 남겨 두면 나중에 확인할 수 있습니다.
+          </div>
+        )}
+      </AdjustmentToggle>
     </Modal>
   )
 }

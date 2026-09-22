@@ -17,6 +17,7 @@ import { useState } from 'react'
 import { api, errorMessage } from '@/ipc/api'
 import type { Department, FeePreview } from '@/ipc/types'
 import { won } from '@/lib/format'
+import { saveExport } from '@/lib/saveFile'
 
 import { Modal } from './Modal'
 import { useToast } from './Toast'
@@ -41,15 +42,11 @@ export function DeptFeeExcel({
 
   async function template() {
     if (!dept) return
-    try {
-      const r = await api.deptFeeTemplate(workspaceId, dept.id)
-      toast.ok(`${r.name} (수강생 ${r.rows}명) 을(를) 만들었습니다.`, {
-        label: '폴더 열기',
-        run: () => void api.openFolder('exports'),
-      })
-    } catch (e) {
-      toast.bad(errorMessage(e))
-    }
+    await saveExport(
+      () => api.deptFeeTemplate(workspaceId, dept.id),
+      toast,
+      (r) => `수강생 ${r.rows}명`,
+    )
   }
 
   async function pick() {

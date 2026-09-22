@@ -8,6 +8,7 @@ import { ToastProvider } from '@/components/Toast'
 import { Button } from '@/components/ui'
 import { errorMessage } from '@/ipc/api'
 import { AppProvider, useApp } from '@/lib/useApp'
+import { AdjustmentPage } from '@/pages/AdjustmentPage'
 import { ChangeLogPage } from '@/pages/ChangeLogPage'
 import { DashboardPage } from '@/pages/DashboardPage'
 import { DepartmentsPage } from '@/pages/DepartmentsPage'
@@ -84,6 +85,7 @@ function Shell({ onYearCreated }: { onYearCreated: () => void }) {
 
           <Route path="roster" element={<Guard>{<RosterPage />}</Guard>} />
           <Route path="student-detail" element={<Guard>{<StudentDetailPage />}</Guard>} />
+          <Route path="adjustments" element={<Guard>{<AdjustmentPage />}</Guard>} />
           <Route path="changes" element={<Guard>{<ChangeLogPage />}</Guard>} />
           <Route path="settlement" element={<Guard>{<SettlementPage />}</Guard>} />
           <Route path="self-pay" element={<Guard>{<SelfPayPage />}</Guard>} />

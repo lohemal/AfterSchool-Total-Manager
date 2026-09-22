@@ -7,6 +7,7 @@
 //!
 //! 오류가 있는 줄 때문에 정상 줄까지 버리지 않는다 (§28).
 
+pub mod adjustment;
 pub mod admin;
 pub mod dept_fees;
 pub mod read;

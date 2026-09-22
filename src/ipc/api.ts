@@ -43,6 +43,10 @@ import type {
   ProgramRow,
   RestoreReport,
   RowIssue,
+  AdjustmentDiff,
+  AdjustmentFilter,
+  AdjustmentInput,
+  AdjustmentView,
   FeeApplyResult,
   FeePreview,
   SelfPayReport,
@@ -166,13 +170,25 @@ export const api = {
     invoke<Enrollment[]>('enrollment_by_department', { workspaceId, departmentId }),
   departmentBaseFees: (departmentId: number) =>
     invoke<Fee[]>('department_base_fees', { departmentId }),
-  enrollmentCreate: (workspaceId: number, input: EnrollmentInput) =>
-    invoke<number>('enrollment_create', { workspaceId, input }),
+  /** `adjustment`를 주면 이 수강 건을 추가징수 대상으로 함께 등록한다 (한 트랜잭션). */
+  enrollmentCreate: (
+    workspaceId: number,
+    input: EnrollmentInput,
+    adjustment?: AdjustmentInput | null,
+  ) => invoke<number>('enrollment_create', { workspaceId, input, adjustment: adjustment ?? null }),
   enrollmentUpdateFees: (id: number, fees: Fee[], reason: string) =>
     invoke<void>('enrollment_update_fees', { id, fees, reason }),
-  /** `fees`를 주면 취소 후 최종 징수금액을 함께 확정한다 (한 트랜잭션). */
-  enrollmentCancel: (id: number, fees: Fee[] | null, reason: string) =>
-    invoke<void>('enrollment_cancel', { id, fees, reason }),
+  /**
+   * `fees`를 주면 취소 후 최종 징수금액을 함께 확정한다 (한 트랜잭션).
+   * `adjustment`를 주면 환불 대상으로 함께 등록한다 — 어느 항목이든 환불액이
+   * 음수면 취소까지 통째로 되돌아간다.
+   */
+  enrollmentCancel: (
+    id: number,
+    fees: Fee[] | null,
+    reason: string,
+    adjustment?: AdjustmentInput | null,
+  ) => invoke<void>('enrollment_cancel', { id, fees, reason, adjustment: adjustment ?? null }),
   /** `resetFees`가 true면 부서 기준금액으로 되돌린다. 기본은 그대로 둔다. */
   enrollmentRestore: (id: number, resetFees: boolean, reason: string) =>
     invoke<void>('enrollment_restore', { id, resetFees, reason }),
@@ -293,6 +309,26 @@ export const api = {
     invoke<FeePreview>('dept_fee_preview', { workspaceId, departmentId, path }),
   deptFeeApply: (workspaceId: number, token: string, reason: string) =>
     invoke<FeeApplyResult>('dept_fee_apply', { workspaceId, token, reason }),
+
+  // ── 추가징수 · 환불 (v0.1.5)
+  adjustmentView: (workspaceId: number, filter: AdjustmentFilter) =>
+    invoke<AdjustmentView>('adjustment_view', { workspaceId, filter }),
+  adjustmentNeedsCheck: (workspaceId: number) =>
+    invoke<number>('adjustment_needs_check', { workspaceId }),
+  adjustmentDiffs: (workspaceId: number) =>
+    invoke<AdjustmentDiff[]>('adjustment_diffs', { workspaceId }),
+  /** `mode`: `KEEP`(기존 금액 유지) | `APPLY`(현재 금액 반영) */
+  adjustmentConfirm: (ids: number[], mode: 'KEEP' | 'APPLY') =>
+    invoke<number>('adjustment_confirm', { ids, mode }),
+  adjustmentDelete: (ids: number[]) => invoke<number>('adjustment_delete', { ids }),
+  adjustmentExport: (workspaceId: number, filter: AdjustmentFilter, cond: string) =>
+    invoke<ExportResult>('adjustment_export', { workspaceId, filter, cond }),
+
+  // ── 업무파일 저장 위치 (v0.1.5)
+  exportDeliver: (from: string, to: string) => invoke<string>('export_deliver', { from, to }),
+  exportDiscard: (path: string) => invoke<void>('export_discard', { path }),
+  exportLastDir: () => invoke<string | null>('export_last_dir'),
+  revealFile: (path: string) => invoke<void>('reveal_file', { path }),
 
   excelCommit: (token: string, yearId: number, workspaceId?: number | null) =>
     invoke<ImportResult>('excel_commit', { token, yearId, workspaceId: workspaceId ?? null }),

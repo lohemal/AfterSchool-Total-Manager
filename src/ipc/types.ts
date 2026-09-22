@@ -632,3 +632,100 @@ export interface FeeApplyResult {
   students: number
   cells: number
 }
+
+// ─────────────────────────────── 추가징수 · 환불 (v0.1.5)
+//
+// 수강생 명단(지금 얼마를 내는가)과 다른 자료다. 최초 징수 이후에 생긴
+// 추가징수·환불이라는 행정처리 기록이고, 금액은 만든 시점에서 굳는다.
+
+export type AdjustmentKind = 'ADDITIONAL_CHARGE' | 'REFUND'
+
+export interface AdjustmentFee {
+  itemCode: string
+  itemName: string
+  /** 이 조정의 금액 — 추가징수면 더 걷을 돈, 환불이면 돌려줄 돈 */
+  amount: number
+  /** 환불 기준이 된 취소 직전 금액 (추가징수는 0) */
+  baseAmount: number
+  /** 마지막으로 사람이 확인한 그때의 원본 charge */
+  checkedCharge: number
+  /** 지금 수강생 명단의 charge */
+  currentCharge: number
+}
+
+export interface Adjustment {
+  id: number
+  kind: AdjustmentKind
+  studentId: number
+  enrollmentId: number
+  departmentId: number
+  // 지금 정보 — 목록·필터·정렬이 쓴다
+  grade: number
+  classNo: string
+  studentNo: number
+  name: string
+  deptLabel: string
+  enrollmentStatus: EnrollStatus
+  // 만든 때의 표시 — 반이나 부서명이 바뀌어도 그때를 알 수 있다
+  studentLabelAt: string
+  deptLabelAt: string
+  occurredOn: string
+  note: string
+  fees: AdjustmentFee[]
+  total: number
+  needsCheck: boolean
+  createdAt: string
+}
+
+export interface AdjustmentReport {
+  rows: StudentSumRow[]
+  details: Adjustment[]
+  students: number
+  count: number
+  fees: Fee[]
+  total: number
+  needsCheck: number
+}
+
+export interface AdjustmentView {
+  additional: AdjustmentReport
+  refund: AdjustmentReport
+  /** 화면 필터와 무관한 전체 확인 필요 건수 — 사이드바 배지 */
+  needsCheckAll: number
+}
+
+export interface AdjustmentFilter {
+  from?: string | null
+  to?: string | null
+  grade?: number | null
+  classNo?: string | null
+  /** 부서는 **학생을 찾는 조건**이다 */
+  departmentId?: number | null
+  query?: string | null
+}
+
+/** 추가징수·환불을 만들 때 함께 보내는 것. 보내지 않으면 기록을 만들지 않는다. */
+export interface AdjustmentInput {
+  /** 비우면 오늘 */
+  occurredOn?: string | null
+  note?: string | null
+}
+
+export interface AdjustmentDiff {
+  adjustmentId: number
+  kind: AdjustmentKind
+  studentLabel: string
+  deptLabel: string
+  occurredOn: string
+  itemCode: string
+  itemName: string
+  /** 지금 기록에 들어 있는 조정 금액 */
+  saved: number
+  /** 지금 기준으로 다시 계산한 조정 금액 */
+  suggested: number
+  checkedCharge: number
+  currentCharge: number
+  baseAmount: number
+  /** 다시 계산하면 음수가 되는가 — 그러면 반영할 수 없다 */
+  negative: boolean
+}

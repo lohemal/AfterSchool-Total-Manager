@@ -152,6 +152,7 @@ pub fn update(conn: &Connection, id: i64, input: &DepartmentInput) -> AppResult<
 }
 
 pub fn delete_many(conn: &Connection, ids: &[i64]) -> AppResult<usize> {
+    crate::repo::adjustment::block_for_departments(conn, ids)?;
     let mut n = 0;
     for id in ids {
         n += conn.execute("DELETE FROM department WHERE id = ?1", params![id])?;
@@ -160,6 +161,7 @@ pub fn delete_many(conn: &Connection, ids: &[i64]) -> AppResult<usize> {
 }
 
 pub fn delete_all(conn: &Connection, workspace_id: i64) -> AppResult<usize> {
+    crate::repo::adjustment::block_for_workspace(conn, workspace_id)?;
     Ok(conn.execute(
         "DELETE FROM department WHERE workspace_id = ?1",
         params![workspace_id],

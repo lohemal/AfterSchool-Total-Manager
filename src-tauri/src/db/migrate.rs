@@ -56,6 +56,14 @@ const MIGRATIONS: &[Migration] = &[
         sql: include_str!("../../migrations/004_class_no_text.sql"),
         fk_off: true,
     },
+    // 표를 새로 만들기만 한다. 기존 표를 건드리지 않으므로 자료판 트리거가
+    // 돌지 않고, 이미 만든 정산이 이 갱신 때문에 낡음이 되지 않는다.
+    Migration {
+        version: 5,
+        name: "005_billing_adjustment",
+        sql: include_str!("../../migrations/005_billing_adjustment.sql"),
+        fk_off: false,
+    },
 ];
 
 pub fn latest_version() -> i32 {

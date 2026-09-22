@@ -9,8 +9,9 @@
 
 import { useMutation } from '@tanstack/react-query'
 
-import { api, errorMessage } from '@/ipc/api'
+import { api } from '@/ipc/api'
 import type { SettleExportKind } from '@/ipc/types'
+import { saveExport } from '@/lib/saveFile'
 
 import { useToast } from './Toast'
 import { Button } from './ui'
@@ -28,14 +29,8 @@ export function ExportButton({
   const toast = useToast()
 
   const run = useMutation({
-    mutationFn: () => api.settlementExport(workspaceId, kind),
-    onSuccess: (r) => {
-      toast.ok(`${r.name} (${r.rows}건) 을(를) 만들었습니다.`, {
-        label: '폴더 열기',
-        run: () => void api.openFolder('exports'),
-      })
-    },
-    onError: (e) => toast.bad(errorMessage(e)),
+    mutationFn: () =>
+      saveExport(() => api.settlementExport(workspaceId, kind), toast, (r) => `${r.rows}건`),
   })
 
   return (

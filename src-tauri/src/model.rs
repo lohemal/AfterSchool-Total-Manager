@@ -724,3 +724,132 @@ pub struct FeeApplyResult {
     /// 바뀐 칸 수
     pub cells: i64,
 }
+
+// ─────────────────────────────────────────────── 추가징수 · 환불 (v0.1.5)
+//
+// 최초 징수 이후에 생긴 행정처리 기록이다. 수강생 명단(지금 얼마를 내는가)과
+// 다른 자료이므로 금액을 만든 시점의 값으로 굳혀 둔다.
+
+/// 조정 한 건의 항목별 금액.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AdjustmentFee {
+    pub item_code: String,
+    pub item_name: String,
+    /// 이 조정의 금액 — 추가징수면 더 걷을 돈, 환불이면 돌려줄 돈
+    pub amount: i64,
+    /// 환불 기준이 된 취소 직전 금액 (추가징수는 0)
+    pub base_amount: i64,
+    /// 마지막으로 사람이 확인한 그때의 원본 charge
+    pub checked_charge: i64,
+    /// 지금 수강생 명단의 charge
+    pub current_charge: i64,
+}
+
+/// 조정 한 건 (= 수강 건 하나에 대한 추가징수 또는 환불).
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Adjustment {
+    pub id: i64,
+    pub kind: String,
+    pub student_id: i64,
+    pub enrollment_id: i64,
+    pub department_id: i64,
+    // 지금 정보 — 목록·필터·정렬이 쓴다
+    pub grade: i64,
+    pub class_no: String,
+    pub student_no: i64,
+    pub name: String,
+    pub dept_label: String,
+    /// 이 수강 건이 지금 수강중인가 취소인가
+    pub enrollment_status: String,
+    // 만든 때의 표시 — 반이나 부서명이 바뀌어도 그때를 알 수 있게 병기한다
+    pub student_label_at: String,
+    pub dept_label_at: String,
+    pub occurred_on: String,
+    pub note: String,
+    pub fees: Vec<AdjustmentFee>,
+    pub total: i64,
+    /// 원본 금액이 달라져 사람이 확인해야 하는가
+    pub needs_check: bool,
+    pub created_at: String,
+}
+
+/// 추가·취소 관리 한 탭의 결과 — 학생별 합계 + 부서별 상세.
+///
+/// 학생별 징수 내역과 같은 모양이다. 다만 원본이 `charge` 가 아니라 이
+/// 조정 기록이다.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AdjustmentReport {
+    /// 학생당 한 줄
+    pub rows: Vec<StudentSumRow>,
+    /// 조정 건별 상세
+    pub details: Vec<Adjustment>,
+    pub students: i64,
+    /// 조정 건수
+    pub count: i64,
+    /// 항목별 총합
+    pub fees: Vec<Fee>,
+    pub total: i64,
+    /// 이 가운데 확인이 필요한 건수
+    pub needs_check: i64,
+}
+
+/// 추가·취소 관리 화면이 한 번에 받는 것 — 두 탭 + 확인 필요 건수.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AdjustmentView {
+    pub additional: AdjustmentReport,
+    pub refund: AdjustmentReport,
+    /// 작업공간 전체(필터와 무관)의 확인 필요 건수 — 사이드바 배지에 쓴다
+    pub needs_check_all: i64,
+}
+
+/// 추가·취소 관리 목록 조건.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AdjustmentFilter {
+    /// 발생일 기간 'YYYY-MM-DD'
+    pub from: Option<String>,
+    pub to: Option<String>,
+    pub grade: Option<i64>,
+    pub class_no: Option<String>,
+    /// 부서는 **학생을 찾는 조건**이다 (학생별 징수 내역과 같은 원칙)
+    pub department_id: Option<i64>,
+    pub query: Option<String>,
+}
+
+/// 추가징수·환불을 만들 때 함께 받는 것.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AdjustmentInput {
+    /// 발생일. 비우면 오늘
+    pub occurred_on: Option<String>,
+    pub note: Option<String>,
+}
+
+/// 원본이 달라진 칸 하나 — 변경내역 확인 화면이 보여 준다.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AdjustmentDiff {
+    pub adjustment_id: i64,
+    pub kind: String,
+    pub student_label: String,
+    pub dept_label: String,
+    pub occurred_on: String,
+    pub item_code: String,
+    pub item_name: String,
+    /// 지금 기록에 들어 있는 조정 금액
+    pub saved: i64,
+    /// 지금 기준으로 다시 계산한 조정 금액
+    pub suggested: i64,
+    /// 마지막으로 확인한 그때의 원본 charge
+    pub checked_charge: i64,
+    /// 지금 원본 charge
+    pub current_charge: i64,
+    /// 환불 기준(취소 직전 금액). 추가징수는 0
+    pub base_amount: i64,
+    /// 지금 기준으로 다시 계산하면 음수가 되는가 — 그러면 반영할 수 없다
+    pub negative: bool,
+}

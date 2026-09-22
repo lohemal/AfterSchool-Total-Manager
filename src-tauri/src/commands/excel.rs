@@ -234,3 +234,115 @@ pub fn fee_report_export(
         excel::export_fee_report(c, workspace_id, &items, &filter, &scope, &cond, &dir)
     })
 }
+
+// ─────────────────────────────────── 추가징수 · 환불 Excel (v0.1.5)
+
+/// 화면에서 고른 발생일 기간·조건 그대로 한 파일 세 장을 만든다.
+///
+/// 확인이 필요한 기록이 하나라도 있으면 `excel::adjustment` 가 막는다.
+#[tauri::command]
+pub fn adjustment_export(
+    db: State<'_, Db>,
+    workspace_id: i64,
+    filter: crate::model::AdjustmentFilter,
+    cond: String,
+) -> AppResult<ExportResult> {
+    let dir = db.export_dir();
+    db.read(|c| {
+        let items = repo::cost_items(c)?;
+        let ws = repo::year::get_workspace(c, workspace_id)?;
+        let year = repo::year::get_year(c, ws.year_id)?;
+        let scope = [year.name.as_str(), ws.name.as_str()];
+        let view = repo::adjustment::view(c, workspace_id, &filter, &items)?;
+        excel::adjustment::write_adjustments(&view, &items, &scope, &cond, &dir)
+    })
+}
+
+// ─────────────────────────────────── 업무파일 저장 위치 (v0.1.5)
+//
+// 만들어진 파일을 사람이 고른 자리로 옮긴다. 파일을 만드는 서비스는 그대로
+// 두고 — 그래야 지금까지의 시험이 그대로 쓰인다 — 마지막 한 걸음만 여기서
+// 처리한다.
+
+/// 앱이 만든 파일만 옮긴다. 밖에서 아무 경로나 들어오지 못하게 막는다.
+fn must_be_ours(db: &Db, from: &std::path::Path) -> AppResult<()> {
+    let ours = db.export_dir();
+    let ok = from
+        .canonicalize()
+        .ok()
+        .zip(ours.canonicalize().ok())
+        .map(|(f, o)| f.starts_with(&o))
+        .unwrap_or(false);
+    if !ok {
+        return Err(AppError::invalid("앱이 만든 파일이 아닙니다."));
+    }
+    Ok(())
+}
+
+/// 만들어 둔 파일을 사람이 고른 자리로 옮기고, 그 폴더를 기억한다.
+#[tauri::command]
+pub fn export_deliver(db: State<'_, Db>, from: String, to: String) -> AppResult<String> {
+    let src = PathBuf::from(&from);
+    let dst = PathBuf::from(&to);
+    must_be_ours(&db, &src)?;
+    if !src.exists() {
+        return Err(AppError::invalid("만들어 둔 파일을 찾지 못했습니다."));
+    }
+    if let Some(parent) = dst.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    // 다른 드라이브로 옮길 때는 rename 이 듣지 않는다 — 그때는 복사하고 지운다.
+    if std::fs::rename(&src, &dst).is_err() {
+        std::fs::copy(&src, &dst)?;
+        let _ = std::fs::remove_file(&src);
+    }
+
+    if let Some(parent) = dst.parent().and_then(|p| p.to_str()) {
+        let _ = db.write(|c| repo::setting::set(c, LAST_SAVE_DIR, parent));
+    }
+    Ok(dst.to_string_lossy().to_string())
+}
+
+/// 저장을 그만두었을 때 — 만들어 둔 임시 파일을 지운다. 아무것도 남기지 않는다.
+#[tauri::command]
+pub fn export_discard(db: State<'_, Db>, path: String) -> AppResult<()> {
+    let p = PathBuf::from(&path);
+    if must_be_ours(&db, &p).is_ok() {
+        let _ = std::fs::remove_file(&p);
+    }
+    Ok(())
+}
+
+/// 업무파일을 마지막으로 저장한 폴더. 저장 창의 처음 자리로 쓴다.
+pub const LAST_SAVE_DIR: &str = "export.last_dir";
+
+#[tauri::command]
+pub fn export_last_dir(db: State<'_, Db>) -> AppResult<Option<String>> {
+    let saved = db.read(|c| repo::setting::get(c, LAST_SAVE_DIR))?;
+    // 폴더가 사라졌으면 없는 것으로 친다 — 없는 자리를 열면 저장 창이 어색해진다.
+    Ok(saved.filter(|p| std::path::Path::new(p).is_dir()))
+}
+
+/// 저장한 파일이 있는 폴더를 탐색기로 연다.
+#[tauri::command]
+pub fn reveal_file(path: String) -> AppResult<()> {
+    let p = PathBuf::from(&path);
+    if !p.exists() {
+        return Err(AppError::invalid("파일을 찾지 못했습니다."));
+    }
+    #[cfg(target_os = "windows")]
+    {
+        // `/select,` 는 폴더를 열면서 그 파일을 고른 채로 보여 준다.
+        let _ = std::process::Command::new("explorer")
+            .arg(format!("/select,{}", p.display()))
+            .spawn();
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        if let Some(dir) = p.parent() {
+            let _ = std::process::Command::new("xdg-open").arg(dir).spawn();
+        }
+    }
+    Ok(())
+}
