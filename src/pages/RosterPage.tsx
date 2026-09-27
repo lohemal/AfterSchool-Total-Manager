@@ -8,11 +8,16 @@
  */
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 
 import { ApplyFeesModal } from '@/components/ApplyFeesModal'
 import { CancelModal } from '@/components/CancelModal'
 import { cmp, DataTable, type Column } from '@/components/DataTable'
+import {
+  DEFAULT_PAGE_SIZE,
+  normalizePageSize,
+  Pager,
+} from '@/components/Pager'
 import { EnrollmentModal } from '@/components/EnrollmentModal'
 import { ExcelTools } from '@/components/ExcelTools'
 import { Confirm, Modal } from '@/components/Modal'
@@ -21,7 +26,11 @@ import { Button, Card, Empty, Field, Input, Notice, Search, Select } from '@/com
 import { api, errorMessage } from '@/ipc/api'
 import type { Enrollment, EnrollmentFilter } from '@/ipc/types'
 import { compareClassNo, supportLabel, won } from '@/lib/format'
+import type { SortSpec } from '@/lib/sortSpec'
 import { useApp } from '@/lib/useApp'
+
+/** 쪽당 개수를 기억해 두는 자리. */
+const PAGE_SIZE_KEY = 'roster.page_size'
 
 export function RosterPage() {
   const app = useApp()
@@ -37,6 +46,10 @@ export function RosterPage() {
   const [query, setQuery] = useState('')
 
   const [selected, setSelected] = useState<number[]>([])
+  // 다중 정렬과 쪽 (v0.1.6). 둘 다 **서버**가 처리한다 — 화면은 한 쪽만 들고 있다.
+  const [sort, setSort] = useState<SortSpec[]>([])
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
   const [editing, setEditing] = useState<Enrollment | 'new' | null>(null)
   const [cancelling, setCancelling] = useState<Enrollment | null>(null)
   const [restoring, setRestoring] = useState<Enrollment | null>(null)
@@ -55,11 +68,39 @@ export function RosterPage() {
     [departmentId, grade, classNo, program, status, query],
   )
 
+  // 쪽당 개수는 기억해 둔다 — 담당자마다 손에 맞는 크기가 다르다.
+  useEffect(() => {
+    let 살아있음 = true
+    void api
+      .getSetting(PAGE_SIZE_KEY)
+      .then((v) => {
+        if (살아있음 && v !== null) setPageSize(normalizePageSize(v))
+      })
+      .catch(() => undefined)
+    return () => {
+      살아있음 = false
+    }
+  }, [])
+
+  // 필터·정렬·쪽당 개수가 바뀌면 1쪽으로 — 8쪽을 보던 중 결과가 2쪽으로 줄면
+  // 빈 화면이 남는다.
+  useEffect(() => {
+    setPage(1)
+    setSelected([])
+  }, [filter, sort, pageSize])
+
   const list = useQuery({
-    queryKey: ['enrollments', wsId, filter],
-    queryFn: () => api.enrollmentList(wsId!, filter),
+    queryKey: ['enrollments', wsId, filter, sort, page, pageSize],
+    queryFn: () => api.enrollmentPage(wsId!, filter, sort, page, pageSize),
     enabled: wsId !== null,
+    placeholderData: (prev) => prev,
   })
+
+  // 자료가 줄어 지금 쪽이 사라지면 서버가 마지막 쪽을 준다. 화면도 따라간다.
+  useEffect(() => {
+    const p = list.data?.page
+    if (p && p !== page) setPage(p)
+  }, [list.data?.page, page])
 
   const departments = useQuery({
     queryKey: ['departments', wsId, ''],
@@ -67,22 +108,29 @@ export function RosterPage() {
     enabled: wsId !== null,
   })
 
-  // 필터 후보는 전체 명단에서 뽑는다.
-  const all = useQuery({
-    queryKey: ['enrollments-all', wsId],
-    queryFn: () => api.enrollmentList(wsId!, {}),
+  // 필터 후보는 **서로 다른 값만** 읽는다. 전체 명단을 한 번 더 읽으면 쪽을
+  // 나눈 뜻이 없어진다.
+  const options = useQuery({
+    queryKey: ['enrollment-filter-options', wsId],
+    queryFn: () => api.enrollmentFilterOptions(wsId!),
     enabled: wsId !== null,
   })
-  const grades = useMemo(
-    () => [...new Set((all.data ?? []).map((e) => e.grade))].sort((a, b) => a - b),
-    [all.data],
-  )
+  const grades = options.data?.grades ?? []
   const classes = useMemo(() => {
-    const rows = (all.data ?? []).filter((e) => !grade || e.grade === Number(grade))
-    return [...new Set(rows.map((e) => e.classNo))].sort(compareClassNo)
-  }, [all.data, grade])
+    const rows = (options.data?.classes ?? []).filter(
+      (c) => !grade || c.grade === Number(grade),
+    )
+    return [...new Set(rows.map((c) => c.classNo))].sort(compareClassNo)
+  }, [options.data, grade])
 
-  const one = selected.length === 1 ? list.data?.find((e) => e.id === selected[0]) : undefined
+  // 전체 삭제 확인창에 적을 건수. 창을 열 때만 세고, 줄은 한 개만 읽는다.
+  const allCount = useQuery({
+    queryKey: ['enrollments-count', wsId],
+    queryFn: () => api.enrollmentPage(wsId!, {}, [], 1, 1),
+    enabled: wsId !== null && deletingAll,
+  })
+
+  const one = selected.length === 1 ? list.data?.rows.find((e) => e.id === selected[0]) : undefined
 
   const toast = useToast()
   const deleteAll = useMutation({
@@ -113,13 +161,12 @@ export function RosterPage() {
     )
   }
 
-  const rows = list.data ?? []
-  const activeRows = rows.filter((e) => e.status === 'ACTIVE')
+  const rows = list.data?.rows ?? []
+  // 건수와 합계는 **필터에 걸린 전체**다 — 지금 쪽만의 합이 아니다.
+  const total = list.data?.total ?? 0
+  const activeTotal = list.data?.activeTotal ?? 0
   const sumOf = (code: string) =>
-    activeRows.reduce(
-      (s, e) => s + (e.fees.find((f) => f.itemCode === code)?.amount ?? 0),
-      0,
-    )
+    list.data?.fees.find((f) => f.itemCode === code)?.amount ?? 0
 
   const columns: Column<Enrollment>[] = [
     {
@@ -331,7 +378,16 @@ export function RosterPage() {
         </div>
 
         <div className="toolbar__note">
-          줄을 두 번 누르면 <b>수정</b>창이 열립니다. 한 번 누르는 것은 선택입니다.
+          줄을 두 번 누르면 <b>수정</b>창이 열립니다. 한 번 누르는 것은 선택입니다. 열 제목을
+          누르면 정렬되고, 여러 열을 눌러 <b>최대 5개</b>까지 차례를 쌓을 수 있습니다.
+          {sort.length > 0 && (
+            <>
+              {' · '}
+              <button type="button" className="linkBtn" onClick={() => setSort([])}>
+                정렬 초기화
+              </button>
+            </>
+          )}
         </div>
 
         <DataTable
@@ -342,17 +398,23 @@ export function RosterPage() {
           onSelected={setSelected}
           onRowClick={(e) => setSelected([e.id])}
           onRowDoubleClick={(e) => setEditing(e)}
+          sort={sort}
+          onSort={(next, message) => {
+            if (message) toast.warn(message)
+            else setSort(next)
+          }}
           empty={
             list.isLoading
               ? '불러오는 중…'
-              : (all.data?.length ?? 0) > 0
+              : (options.data?.grades.length ?? 0) > 0
                 ? '조건에 맞는 수강생이 없습니다.'
                 : '수강 자료가 없습니다. [수기 추가]나 [Excel 업로드]로 등록해 주세요.'
           }
           foot={
             <>
               <span>
-                모두 <b>{rows.length}</b>건 · 수강중 <b>{activeRows.length}</b>건
+                모두 <b>{total.toLocaleString('ko-KR')}</b>건 · 수강중{' '}
+                <b>{activeTotal.toLocaleString('ko-KR')}</b>건
               </span>
               {selected.length > 0 && <span>· 선택 {selected.length}건</span>}
               <span className="toolbar__spacer" />
@@ -362,11 +424,29 @@ export function RosterPage() {
                 </span>
               ))}
               <span>
-                합계 <b>{won(activeRows.reduce((s, e) => s + e.total, 0))}</b>
+                합계 <b>{won(list.data?.amountTotal ?? 0)}</b>
               </span>
             </>
           }
         />
+
+        <div style={{ padding: '0 12px 12px' }}>
+          <Pager
+            page={list.data?.page ?? 1}
+            pageCount={list.data?.pageCount ?? 1}
+            total={total}
+            pageSize={pageSize}
+            onPage={(p) => {
+              setPage(p)
+              // 보이지 않는 학생이 골라진 채로 남지 않게 한다
+              setSelected([])
+            }}
+            onPageSize={(n) => {
+              setPageSize(n)
+              void api.setSetting(PAGE_SIZE_KEY, String(n))
+            }}
+          />
+        </div>
       </Card>
 
       {editing && (
@@ -414,7 +494,7 @@ export function RosterPage() {
           message={
             <>
               이 작업은 <b>{app.workspace?.name}</b> 작업공간의 수강 자료{' '}
-              <b>{(all.data ?? []).length}건</b>을 모두 삭제합니다.
+              <b>{(allCount.data?.total ?? 0).toLocaleString('ko-KR')}건</b>을 모두 삭제합니다.
               <div style={{ marginTop: 8, lineHeight: 1.9 }}>
                 취소 상태인 수강까지 함께 사라지고, 금액과 변경 대상 기록도 지워집니다.
                 <br />학생정보와 부서정보는 그대로 남습니다.

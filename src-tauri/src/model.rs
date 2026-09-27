@@ -853,3 +853,107 @@ pub struct AdjustmentDiff {
     /// 지금 기준으로 다시 계산하면 음수가 되는가 — 그러면 반영할 수 없다
     pub negative: bool,
 }
+
+// ─────────────────────────────────────────── 작업공간 자료 가져오기 (v0.1.6)
+//
+// 새 기수를 시작할 때마다 부서와 수강생을 처음부터 다시 넣지 않도록, 같은
+// 학년도의 다른 작업공간에서 **운영자료**를 옮겨 온다.
+//
+// 학생정보와 지원대상자는 학년도 소속이라 이미 공유된다 — 복제하지 않는다.
+// 금액(charge·override)·추가징수·환불·정산은 지난 기간의 결과이므로 넘기지
+// 않는다. 새 기간은 새 징수명단을 만드는 자리다.
+
+/// 무엇을 가져올지.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceCopyInput {
+    pub source_workspace_id: i64,
+    pub departments: bool,
+    /// 수강생을 가져오려면 부서도 함께 가져와야 한다 — 수강은 부서를 가리키기
+    /// 때문이다. 명령 계층이 이 규칙을 검사한다.
+    pub enrollments: bool,
+}
+
+/// 만들기 전에 보여 주는 요약 — 무엇이 넘어오고 무엇이 넘어오지 않는지.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceCopyPreview {
+    pub source_workspace_id: i64,
+    pub source_name: String,
+    pub departments: i64,
+    /// 가져올 수강 (수강중)
+    pub active_enrollments: i64,
+    /// 가져오지 않는 수강 (취소)
+    pub cancelled_enrollments: i64,
+    /// 가져오지 않는 것들 — 화면에 그대로 적는다
+    pub adjustments: i64,
+    pub settlements: i64,
+    /// 학생별로 따로 고쳐 둔 금액 칸 수. 새 기간에는 넘기지 않는다
+    pub overridden_cells: i64,
+    /// 부서 차감 우선순위가 정해져 있는가
+    pub has_priority: bool,
+    /// 눈에 띄는 문제 — 조용히 건너뛰지 않고 여기 적는다
+    pub warnings: Vec<String>,
+}
+
+/// 가져오기 결과.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceCopyResult {
+    pub workspace_id: i64,
+    pub departments: i64,
+    pub enrollments: i64,
+    pub charges: i64,
+}
+
+// ─────────────────────────────────────────── 다중 정렬 · 페이지 (v0.1.6)
+
+/// 정렬 한 칸. `key` 는 **미리 정해 둔 이름**이라야 한다 — 화면이 보낸 글자를
+/// SQL 에 그대로 넣지 않는다.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SortSpec {
+    pub key: String,
+    /// `ASC` | `DESC`
+    pub dir: String,
+}
+
+/// 한 쪽 분량의 수강생 명단.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EnrollmentPage {
+    /// 이 쪽에 보일 줄만
+    pub rows: Vec<Enrollment>,
+    /// 필터에 걸린 전체 건수 (쪽 나누기 전)
+    pub total: i64,
+    /// 그 가운데 수강중
+    pub active_total: i64,
+    /// **필터에 걸린 수강중 전체**의 항목별 합계. 쪽을 나눠도 화면 아래 합계가
+    /// 이 쪽만의 합이 되면 안 되므로 서버에서 센다.
+    pub fees: Vec<Fee>,
+    /// 위 합계의 총액
+    pub amount_total: i64,
+    /// 1부터
+    pub page: i64,
+    pub page_size: i64,
+    pub page_count: i64,
+}
+
+/// 필터 드롭다운을 채울 값들.
+///
+/// 예전에는 전체 명단을 한 번 더 읽어 여기서 뽑았다. 쪽 나누기를 넣은 뒤에도
+/// 그러면 무거운 조회가 그대로 남으므로, 서로 다른 값만 따로 읽는다.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EnrollmentFilterOptions {
+    pub grades: Vec<i64>,
+    /// 학년별 반 — `[["1", …], …]` 가 아니라 (학년, 반) 쌍으로 준다
+    pub classes: Vec<GradeClass>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GradeClass {
+    pub grade: i64,
+    pub class_no: String,
+}

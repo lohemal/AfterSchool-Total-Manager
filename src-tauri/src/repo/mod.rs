@@ -15,6 +15,7 @@ pub mod priority;
 pub mod setting;
 pub mod settle;
 pub mod student;
+pub mod workspace_copy;
 pub mod year;
 
 use rusqlite::Connection;
@@ -77,3 +78,6 @@ mod fee_report_tests;
 
 #[cfg(test)]
 mod adjustment_tests;
+
+#[cfg(test)]
+mod workspace_copy_tests;

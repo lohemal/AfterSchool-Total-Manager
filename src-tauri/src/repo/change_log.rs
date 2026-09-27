@@ -16,6 +16,8 @@ pub const ENROLL_CANCEL: &str = "ENROLL_CANCEL";
 pub const ENROLL_RESTORE: &str = "ENROLL_RESTORE";
 pub const CHARGE_EDIT: &str = "CHARGE_EDIT";
 pub const DEPT_APPLY: &str = "DEPT_APPLY";
+/// 새 작업공간을 만들며 기존 작업공간의 운영자료를 가져온 일 (v0.1.6)
+pub const WS_IMPORT: &str = "WS_IMPORT";
 
 pub fn kind_label(kind: &str) -> &'static str {
     match kind {
@@ -25,6 +27,7 @@ pub fn kind_label(kind: &str) -> &'static str {
         ENROLL_RESTORE => "수강 복원",
         CHARGE_EDIT => "금액 변경",
         DEPT_APPLY => "부서금액 재반영",
+        WS_IMPORT => "작업공간 자료 가져오기",
         "ELIGIBILITY" => "지원자격 변경",
         "GRANT" => "지원금 변경",
         "POLICY" => "지원정책 변경",

@@ -16,6 +16,7 @@ import { Button, Card, Field, Input, Notice, NumInput, Search, Select } from '@/
 import { api, errorMessage } from '@/ipc/api'
 import type { Student, StudentFilter, StudentInput } from '@/ipc/types'
 import { compareClassNo, supportLabel } from '@/lib/format'
+import type { SortSpec } from '@/lib/sortSpec'
 import { useApp } from '@/lib/useApp'
 
 const EMPTY_FILTER: StudentFilter = {}
@@ -30,6 +31,8 @@ export function StudentsPage() {
   const [program, setProgram] = useState('')
   const [query, setQuery] = useState('')
   const [selected, setSelected] = useState<number[]>([])
+  // 다중 정렬 (v0.1.6). 이 화면은 목록 전체를 들고 있으므로 화면에서 정렬한다.
+  const [sort, setSort] = useState<SortSpec[]>([])
   const [editing, setEditing] = useState<Student | 'new' | null>(null)
   const [confirm, setConfirm] = useState<'some' | 'all' | null>(null)
 
@@ -220,7 +223,25 @@ export function StudentsPage() {
           줄을 두 번 누르면 <b>수정</b>창이 열립니다. 한 번 누르는 것은 선택입니다.
         </div>
 
+        <div className="toolbar__note">
+          열 제목을 누르면 정렬되고, 여러 열을 눌러 <b>최대 5개</b>까지 차례를 쌓을 수
+          있습니다.
+          {sort.length > 0 && (
+            <>
+              {' · '}
+              <button type="button" className="linkBtn" onClick={() => setSort([])}>
+                정렬 초기화
+              </button>
+            </>
+          )}
+        </div>
+
         <DataTable
+          sort={sort}
+          onSort={(next, message) => {
+            if (message) toast.warn(message)
+            else setSort(next)
+          }}
           rows={list.data ?? []}
           columns={columns}
           getId={(s) => s.id}

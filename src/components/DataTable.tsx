@@ -9,14 +9,20 @@
 import { useMemo, useState, type ReactNode } from 'react'
 import { compareClassNo } from '@/lib/format'
 import { isControlPath } from '@/lib/rowAction'
+import { applySort, sortMark, toggleSort as toggle, type SortSpec } from '@/lib/sortSpec'
 
 export interface Column<T> {
   key: string
   head: string
   align?: 'center' | 'left' | 'num'
   width?: number
-  /** 주면 열 제목을 눌러 정렬할 수 있다 */
+  /** 주면 열 제목을 눌러 **화면에서** 정렬할 수 있다 */
   sort?: (a: T, b: T) => number
+  /**
+   * 비교기 없이 정렬할 수 있는 열. 서버가 `ORDER BY` 로 정렬해 주는 표에서
+   * 쓴다 — 화면은 누르기와 표시만 맡는다.
+   */
+  sortable?: boolean
   render: (row: T, index: number) => ReactNode
 }
 
@@ -28,6 +34,8 @@ export function DataTable<T>({
   onSelected,
   onRowClick,
   onRowDoubleClick,
+  sort,
+  onSort,
   activeId,
   empty,
   maxHeight,
@@ -45,26 +53,52 @@ export function DataTable<T>({
    * 한 번 누르는 것은 그대로 선택이다.
    */
   onRowDoubleClick?: (row: T) => void
+  /**
+   * 다중 정렬 (v0.1.6). 주면 열 제목을 눌러 **최대 5개**까지 쌓을 수 있고,
+   * 머리글에 `↑¹ ↓²` 로 방향과 순번이 붙는다.
+   *
+   * 화면이 스스로 정렬한다 — `sort` 를 받고 `col.sort` 비교기가 있는 열만.
+   * 서버가 정렬해 주는 표(수강생 명단)는 비교기를 주지 않으면 된다. 그러면
+   * 여기서는 줄을 건드리지 않고 머리글 표시와 누르기만 맡는다.
+   */
+  sort?: SortSpec[]
+  onSort?: (next: SortSpec[], message: string | null) => void
   activeId?: number | null
   empty?: ReactNode
   maxHeight?: number
   foot?: ReactNode
 }) {
+  // 다중 정렬을 쓰지 않는 표를 위한 한 열 정렬 (예전 그대로)
   const [sortKey, setSortKey] = useState<string | null>(null)
   const [desc, setDesc] = useState(false)
 
   const sorted = useMemo(() => {
+    if (sort) {
+      // 비교기가 있는 열만 화면에서 정렬한다. 하나도 없으면 서버가 이미
+      // 정렬해 준 것이므로 받은 차례를 그대로 쓴다.
+      const compare: Record<string, (a: T, b: T) => number> = {}
+      for (const c of columns) if (c.sort) compare[c.key] = c.sort
+      if (Object.keys(compare).length === 0) return rows
+      return applySort(rows, sort, compare, (a, b) => getId(a) - getId(b))
+    }
     const col = columns.find((c) => c.key === sortKey)
     if (!col?.sort) return rows
     const out = [...rows].sort(col.sort)
     return desc ? out.reverse() : out
-  }, [rows, columns, sortKey, desc])
+  }, [rows, columns, sortKey, desc, sort, getId])
 
   const selectable = selected !== undefined && onSelected !== undefined
   const allIds = sorted.map(getId)
   const allChecked = selectable && allIds.length > 0 && allIds.every((id) => selected.includes(id))
 
-  function toggleSort(col: Column<T>) {
+  /** 열 제목을 눌렀다. 다중 정렬을 쓰는 표면 바깥에 알리고, 아니면 예전처럼. */
+  function toggleSortCol(col: Column<T>) {
+    if (!col.sortable && !col.sort) return
+    if (sort && onSort) {
+      const r = toggle(sort, col.key)
+      onSort(r.sort, r.message)
+      return
+    }
     if (!col.sort) return
     if (sortKey === col.key) {
       setDesc((d) => !d)
@@ -93,14 +127,24 @@ export function DataTable<T>({
               {columns.map((c) => (
                 <th
                   key={c.key}
-                  className={[c.align === 'num' ? 'num' : '', c.align === 'left' ? 'left' : '', c.sort ? 'sortable' : '']
+                  className={[
+                    c.align === 'num' ? 'num' : '',
+                    c.align === 'left' ? 'left' : '',
+                    c.sort || c.sortable ? 'sortable' : '',
+                  ]
                     .filter(Boolean)
                     .join(' ')}
                   style={c.width ? { width: c.width } : undefined}
-                  onClick={() => toggleSort(c)}
+                  onClick={() => toggleSortCol(c)}
                 >
                   {c.head}
-                  {sortKey === c.key && <span className="sortMark">{desc ? '▼' : '▲'}</span>}
+                  {sort ? (
+                    sortMark(sort, c.key) && (
+                      <span className="sortMark">{sortMark(sort, c.key)}</span>
+                    )
+                  ) : (
+                    sortKey === c.key && <span className="sortMark">{desc ? '▼' : '▲'}</span>
+                  )}
                 </th>
               ))}
             </tr>

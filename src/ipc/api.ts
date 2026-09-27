@@ -5,6 +5,8 @@
 
 import { invoke } from '@tauri-apps/api/core'
 
+import type { SortSpec } from '@/lib/sortSpec'
+
 import type {
   AppInfo,
   ApplyMode,
@@ -44,6 +46,11 @@ import type {
   RestoreReport,
   RowIssue,
   AdjustmentDiff,
+  EnrollmentFilterOptions,
+  EnrollmentPage,
+  WorkspaceCopyInput,
+  WorkspaceCopyPreview,
+  WorkspaceCopyResult,
   AdjustmentFilter,
   AdjustmentInput,
   AdjustmentView,
@@ -329,6 +336,32 @@ export const api = {
   exportDiscard: (path: string) => invoke<void>('export_discard', { path }),
   exportLastDir: () => invoke<string | null>('export_last_dir'),
   revealFile: (path: string) => invoke<void>('reveal_file', { path }),
+
+  // ── 작업공간 자료 가져오기 · 쪽 나누기 (v0.1.6)
+  workspaceCopyPreview: (sourceWorkspaceId: number) =>
+    invoke<WorkspaceCopyPreview>('workspace_copy_preview', { sourceWorkspaceId }),
+  /** `copy` 를 주면 부서·수강을 같은 트랜잭션에서 가져온다 */
+  workspaceCreateWithCopy: (
+    yearId: number,
+    input: WorkspaceInput,
+    copy?: WorkspaceCopyInput | null,
+  ) =>
+    invoke<WorkspaceCopyResult>('workspace_create_with_copy', {
+      yearId,
+      input,
+      copy: copy ?? null,
+    }),
+  /** 한 쪽만 읽는다. Excel 은 이 명령을 쓰지 않는다 */
+  enrollmentPage: (
+    workspaceId: number,
+    filter: EnrollmentFilter,
+    sort: SortSpec[],
+    page: number,
+    pageSize: number,
+  ) =>
+    invoke<EnrollmentPage>('enrollment_page', { workspaceId, filter, sort, page, pageSize }),
+  enrollmentFilterOptions: (workspaceId: number) =>
+    invoke<EnrollmentFilterOptions>('enrollment_filter_options', { workspaceId }),
 
   excelCommit: (token: string, yearId: number, workspaceId?: number | null) =>
     invoke<ImportResult>('excel_commit', { token, yearId, workspaceId: workspaceId ?? null }),

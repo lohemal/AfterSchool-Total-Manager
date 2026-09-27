@@ -20,6 +20,7 @@ import { useToast } from '@/components/Toast'
 import { Button, Card, Field, Input, Notice, Search } from '@/components/ui'
 import { api, errorMessage } from '@/ipc/api'
 import type { Eligibility, EligibilityInput, ProgramCode } from '@/ipc/types'
+import type { SortSpec } from '@/lib/sortSpec'
 import { useApp } from '@/lib/useApp'
 
 const TABS: { code: ProgramCode; label: string }[] = [
@@ -35,6 +36,8 @@ export function EligibilityPage() {
   const [program, setProgram] = useState<ProgramCode>('VOUCHER')
   const [query, setQuery] = useState('')
   const [selected, setSelected] = useState<number[]>([])
+  // 다중 정렬 (v0.1.6). 이 화면은 목록 전체를 들고 있으므로 화면에서 정렬한다.
+  const [sort, setSort] = useState<SortSpec[]>([])
   const [editing, setEditing] = useState<Eligibility | 'new' | null>(null)
   const [confirm, setConfirm] = useState<'some' | 'all' | null>(null)
   const [onlyMismatch, setOnlyMismatch] = useState(false)
@@ -203,7 +206,25 @@ export function EligibilityPage() {
           </div>
         </div>
 
+        <div className="toolbar__note">
+          열 제목을 누르면 정렬되고, 여러 열을 눌러 <b>최대 5개</b>까지 차례를 쌓을 수
+          있습니다.
+          {sort.length > 0 && (
+            <>
+              {' · '}
+              <button type="button" className="linkBtn" onClick={() => setSort([])}>
+                정렬 초기화
+              </button>
+            </>
+          )}
+        </div>
+
         <DataTable
+          sort={sort}
+          onSort={(next, message) => {
+            if (message) toast.warn(message)
+            else setSort(next)
+          }}
           rows={rows}
           columns={columns}
           getId={(r) => r.id}

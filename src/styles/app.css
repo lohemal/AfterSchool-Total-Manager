@@ -343,6 +343,21 @@
   width: 100%;
 }
 
+/* 글 안에 넣는 작은 단추 — 안내문 속 [정렬 초기화] 같은 것 */
+.linkBtn {
+  border: 0;
+  background: none;
+  padding: 0;
+  font: inherit;
+  color: var(--navy-600);
+  font-weight: 600;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.linkBtn:hover {
+  color: var(--navy-800);
+}
+
 /* ─────────────────────────────────────────── 버튼 */
 
 .btn {

@@ -9,12 +9,12 @@
  */
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 
 import { DataTable, type Column } from '@/components/DataTable'
 import { Confirm, Modal } from '@/components/Modal'
 import { useToast } from '@/components/Toast'
-import { Button, Card, Field, Input, Notice } from '@/components/ui'
+import { Button, Card, Field, Input, Notice, Select } from '@/components/ui'
 import { api, errorMessage } from '@/ipc/api'
 import type { Workspace, WorkspaceInput } from '@/ipc/types'
 import { currentSchoolYear, monthRange } from '@/lib/format'
@@ -199,6 +199,11 @@ function WorkspaceModal({
   const app = useApp()
   const toast = useToast()
   const [confirmOverlap, setConfirmOverlap] = useState(false)
+  // 기존 작업공간에서 운영자료 가져오기 (v0.1.6). 새로 만들 때만 쓴다.
+  const [importOn, setImportOn] = useState(false)
+  const [sourceId, setSourceId] = useState<number | null>(null)
+  const [takeDept, setTakeDept] = useState(true)
+  const [takeEnroll, setTakeEnroll] = useState(true)
   const [form, setForm] = useState<WorkspaceInput>(() => {
     if (value) {
       return {
@@ -227,13 +232,46 @@ function WorkspaceModal({
   })
   const hits = overlaps.data ?? []
 
+  // 같은 학년도의 다른 작업공간이 후보다. 기본값은 **새 기간보다 이른 것 가운데
+  // 가장 가까운 것** — 보통 직전 기수에서 이어받기 때문이다.
+  const others = useMemo(
+    () => app.workspaces.filter((w) => w.id !== value?.id),
+    [app.workspaces, value?.id],
+  )
+  useEffect(() => {
+    if (sourceId !== null || others.length === 0) return
+    const 이전 = others.filter((w) => w.startDate < form.startDate)
+    const 고름 = 이전.length > 0 ? 이전[이전.length - 1] : others[others.length - 1]
+    setSourceId(고름.id)
+  }, [others, form.startDate, sourceId])
+
+  const source = others.find((w) => w.id === sourceId)
+  const preview = useQuery({
+    queryKey: ['ws-copy-preview', sourceId],
+    queryFn: () => api.workspaceCopyPreview(sourceId!),
+    enabled: importOn && sourceId !== null,
+  })
+  const p = preview.data
+
   const save = useMutation({
     mutationFn: async () => {
-      if (value) await api.workspaceUpdate(value.id, form)
-      else await api.workspaceCreate(app.yearId, form)
+      if (value) {
+        await api.workspaceUpdate(value.id, form)
+        return
+      }
+      const copy =
+        importOn && sourceId !== null
+          ? { sourceWorkspaceId: sourceId, departments: true, enrollments: takeEnroll }
+          : null
+      const r = await api.workspaceCreateWithCopy(app.yearId, form, copy)
+      return r
     },
-    onSuccess: () => {
-      toast.ok('저장되었습니다.')
+    onSuccess: (r) => {
+      toast.ok(
+        r && (r.departments > 0 || r.enrollments > 0)
+          ? `작업공간을 만들고 부서 ${r.departments}개 · 수강 ${r.enrollments}건을 가져왔습니다.`
+          : '저장되었습니다.',
+      )
       onSaved()
     },
     onError: (e) => toast.bad(errorMessage(e)),
@@ -341,6 +379,119 @@ function WorkspaceModal({
         <Field label="비고">
           <Input value={form.note ?? ''} onChange={(e) => setForm({ ...form, note: e.target.value })} />
         </Field>
+
+      {!value && others.length > 0 && (
+        <div
+          style={{
+            marginTop: 14,
+            padding: 12,
+            border: '1px solid var(--gray-200)',
+            borderRadius: 8,
+            background: importOn ? 'var(--blue-50)' : undefined,
+          }}
+        >
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+            <input
+              type="checkbox"
+              checked={importOn}
+              onChange={(e) => setImportOn(e.target.checked)}
+            />
+            <b>기존 작업공간에서 운영자료 가져오기</b>
+          </label>
+          <div className="hint" style={{ marginTop: 6, lineHeight: 1.7 }}>
+            새 기수를 시작할 때 부서와 수강생을 처음부터 다시 넣지 않아도 됩니다.
+            <br />
+            학생정보와 지원대상자는 <b>학년도 자료라 이미 함께 쓰고 있어</b> 가져올 것이
+            없습니다.
+          </div>
+
+          {importOn && (
+            <>
+              <div className="formRow" style={{ marginTop: 10 }}>
+                <Field label="기준 작업공간">
+                  <Select
+                    value={sourceId ?? ''}
+                    onChange={(e) => setSourceId(Number(e.target.value))}
+                  >
+                    {others.map((w) => (
+                      <option key={w.id} value={w.id}>
+                        {w.name} ({w.startDate} ~ {w.endDate})
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+                <Field label="가져올 항목">
+                  <div style={{ display: 'flex', gap: 14, alignItems: 'center', height: 40 }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <input
+                        type="checkbox"
+                        checked={takeDept || takeEnroll}
+                        disabled={takeEnroll}
+                        title={
+                          takeEnroll
+                            ? '수강생 명단을 가져오려면 해당 부서정보도 함께 가져와야 합니다.'
+                            : undefined
+                        }
+                        onChange={(e) => setTakeDept(e.target.checked)}
+                      />
+                      부서정보
+                    </label>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <input
+                        type="checkbox"
+                        checked={takeEnroll}
+                        onChange={(e) => {
+                          setTakeEnroll(e.target.checked)
+                          if (e.target.checked) setTakeDept(true)
+                        }}
+                      />
+                      수강생 명단
+                    </label>
+                  </div>
+                </Field>
+              </div>
+              {takeEnroll && (
+                <div className="hint" style={{ marginTop: 4 }}>
+                  수강생 명단을 가져오려면 해당 부서정보도 함께 가져와야 합니다.
+                </div>
+              )}
+
+              {source && p && (
+                <div className="toolbar__note" style={{ marginTop: 10, lineHeight: 2 }}>
+                  <b>{p.sourceName}</b> 에서 가져옵니다.
+                  <div>· 부서정보 <b>{p.departments}개</b></div>
+                  {takeEnroll ? (
+                    <div>· 수강중 학생 <b>{p.activeEnrollments}건</b></div>
+                  ) : (
+                    <div className="muted">· 수강생 명단은 가져오지 않습니다</div>
+                  )}
+                  {p.cancelledEnrollments > 0 && (
+                    <div className="muted">
+                      · 취소 수강 {p.cancelledEnrollments}건은 가져오지 않습니다
+                    </div>
+                  )}
+                  {p.overriddenCells > 0 && (
+                    <div className="muted">
+                      · 학생별로 고쳐 둔 금액 {p.overriddenCells}칸은 가져오지 않습니다 —
+                      새 부서 기준금액으로 시작합니다
+                    </div>
+                  )}
+                  {p.adjustments > 0 && (
+                    <div className="muted">· 추가·취소 기록 {p.adjustments}건은 가져오지 않습니다</div>
+                  )}
+                  {p.settlements > 0 && (
+                    <div className="muted">· 기존 정산 {p.settlements}건은 가져오지 않습니다</div>
+                  )}
+                  {p.hasPriority && <div>· 차감 우선순위도 함께 가져옵니다</div>}
+                  {p.warnings.map((w) => (
+                    <div key={w} style={{ color: 'var(--red-600)' }}>· {w}</div>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
 
         <div className="hint" style={{ marginTop: 12 }}>
           날짜는 목록 순서와 지원금 누적 순서를 함께 정합니다. 어느 지원기간(1학기·2학기 등)에

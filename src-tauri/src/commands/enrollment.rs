@@ -302,3 +302,33 @@ pub fn adjustment_confirm(db: State<'_, Db>, ids: Vec<i64>, mode: String) -> App
 pub fn adjustment_delete(db: State<'_, Db>, ids: Vec<i64>) -> AppResult<usize> {
     db.write(|c| repo::adjustment::delete_many(c, &ids))
 }
+
+// ─────────────────────────────────── 쪽 나누기 · 다중 정렬 (v0.1.6)
+
+/// 수강생 명단 한 쪽.
+///
+/// **전체를 보내지 않는다.** 필터로 거른 뒤 정렬하고, 그 쪽에 보일 줄만 읽는다.
+/// Excel 은 이 명령을 쓰지 않으므로 쪽 나누기의 영향을 받지 않는다.
+#[tauri::command]
+pub fn enrollment_page(
+    db: State<'_, Db>,
+    workspace_id: i64,
+    filter: EnrollmentFilter,
+    sort: Vec<crate::model::SortSpec>,
+    page: i64,
+    page_size: i64,
+) -> AppResult<crate::model::EnrollmentPage> {
+    db.read(|c| {
+        let items = repo::cost_items(c)?;
+        repo::enrollment::list_page(c, workspace_id, &items, &filter, &sort, page, page_size)
+    })
+}
+
+/// 필터 드롭다운에 채울 학년·반.
+#[tauri::command]
+pub fn enrollment_filter_options(
+    db: State<'_, Db>,
+    workspace_id: i64,
+) -> AppResult<crate::model::EnrollmentFilterOptions> {
+    db.read(|c| repo::enrollment::filter_options(c, workspace_id))
+}

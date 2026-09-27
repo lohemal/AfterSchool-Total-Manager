@@ -729,3 +729,57 @@ export interface AdjustmentDiff {
   /** 다시 계산하면 음수가 되는가 — 그러면 반영할 수 없다 */
   negative: boolean
 }
+
+// ─────────────────────────────── 작업공간 자료 가져오기 (v0.1.6)
+
+export interface WorkspaceCopyInput {
+  sourceWorkspaceId: number
+  departments: boolean
+  /** 수강생을 가져오려면 부서도 함께 가져와야 한다 */
+  enrollments: boolean
+}
+
+export interface WorkspaceCopyPreview {
+  sourceWorkspaceId: number
+  sourceName: string
+  departments: number
+  activeEnrollments: number
+  cancelledEnrollments: number
+  adjustments: number
+  settlements: number
+  overriddenCells: number
+  hasPriority: boolean
+  warnings: string[]
+}
+
+export interface WorkspaceCopyResult {
+  workspaceId: number
+  departments: number
+  enrollments: number
+  charges: number
+}
+
+// ─────────────────────────────── 쪽 나누기 (v0.1.6)
+
+export interface EnrollmentPage {
+  rows: Enrollment[]
+  /** 필터에 걸린 전체 건수 (쪽 나누기 전) */
+  total: number
+  activeTotal: number
+  /** 필터에 걸린 수강중 전체의 항목별 합계 — 쪽만의 합이 아니다 */
+  fees: Fee[]
+  amountTotal: number
+  page: number
+  pageSize: number
+  pageCount: number
+}
+
+export interface GradeClass {
+  grade: number
+  classNo: string
+}
+
+export interface EnrollmentFilterOptions {
+  grades: number[]
+  classes: GradeClass[]
+}

@@ -14,10 +14,8 @@ use rusqlite::{params, Connection, OptionalExtension, ToSql};
 
 use crate::domain::{class_no, eligibility_active, grade_matches, parse_grades};
 use crate::error::{AppError, AppResult};
-use crate::model::{
-    ApplyResult, CostItem, Enrollment, EnrollmentFilter, EnrollmentInput, Fee, FeeDiff, FeePick,
-    Student, StudentDetail, SupportView, WorkspaceEnrollments,
-};
+use crate::model::{ApplyResult, CostItem, Enrollment, EnrollmentFilter, EnrollmentInput, Fee, FeeDiff, FeePick,
+    Student, StudentDetail, SupportView, WorkspaceEnrollments, EnrollmentPage, SortSpec};
 use crate::repo::change_log as log;
 
 /// Excel 업로드 한 줄 (검증을 마친 상태).
@@ -341,16 +339,20 @@ pub fn list_by_student(
     list_ordered(conn, workspace_id, items, f, STUDENT_ORDER)
 }
 
-fn list_ordered(
+/// 걸러 내는 조건을 SQL 로 만든다. 목록·건수·쪽 조회가 **같은 것**을 쓴다.
+///
+/// ## 지원유형도 여기서 거른다 (v0.1.6)
+///
+/// 예전에는 자격을 계산한 뒤 Rust 에서 걸렀다. 쪽 나누기를 넣으면 그 방식으로는
+/// `LIMIT` 이 걸러지기 **전** 줄에 걸려 건수와 쪽이 어긋난다. 그래서 같은 규칙을
+/// SQL 로 옮겼다 — 자격 기간이 작업공간 기간과 겹치면 유효하다
+/// (`domain::eligibility_active` 와 같은 판정).
+fn build_where(
     conn: &Connection,
     workspace_id: i64,
-    items: &[CostItem],
     f: &EnrollmentFilter,
-    order: &str,
-) -> AppResult<Vec<Enrollment>> {
-    let year_id = year_of_workspace(conn, workspace_id)?;
-
-    let mut sql = format!("{RAW_SELECT} WHERE e.workspace_id = ?1");
+) -> AppResult<(String, Vec<Box<dyn ToSql>>)> {
+    let mut sql = String::from(" WHERE e.workspace_id = ?1");
     let mut args: Vec<Box<dyn ToSql>> = vec![Box::new(workspace_id)];
 
     if let Some(d) = f.department_id {
@@ -361,7 +363,12 @@ fn list_ordered(
         args.push(Box::new(g));
         sql.push_str(&format!(" AND s.grade = ?{}", args.len()));
     }
-    if let Some(c) = f.class_no.as_ref().map(|s| class_no::normalize(s)).filter(|s| !s.is_empty()) {
+    if let Some(c) = f
+        .class_no
+        .as_ref()
+        .map(|s| class_no::normalize(s))
+        .filter(|s| !s.is_empty())
+    {
         args.push(Box::new(c));
         sql.push_str(&format!(" AND s.class_no = ?{}", args.len()));
     }
@@ -376,7 +383,62 @@ fn list_ordered(
             " AND (s.name LIKE ?{i} OR d.name LIKE ?{i} OR d.class_name LIKE ?{i})"
         ));
     }
-    sql.push_str(order);
+
+    if let Some(p) = f.program.as_deref().filter(|s| !s.is_empty()) {
+        let ws = crate::repo::year::get_workspace(conn, workspace_id)?;
+        let year_id = ws.year_id;
+        // 이 학생에게 그 제도가 이 기간에 유효한가
+        let 있다 = |args: &mut Vec<Box<dyn ToSql>>, program: Option<&str>| {
+            args.push(Box::new(year_id));
+            let y = args.len();
+            args.push(Box::new(ws.end_date.clone()));
+            let e = args.len();
+            args.push(Box::new(ws.start_date.clone()));
+            let s0 = args.len();
+            let 제도 = match program {
+                Some(p) => {
+                    args.push(Box::new(p.to_string()));
+                    format!(" AND el.program = ?{}", args.len())
+                }
+                None => String::new(),
+            };
+            format!(
+                "EXISTS (SELECT 1 FROM support_eligibility el
+                          WHERE el.student_id = e.student_id AND el.year_id = ?{y}{제도}
+                            AND (el.valid_from IS NULL OR el.valid_from <= ?{e})
+                            AND (el.valid_to   IS NULL OR el.valid_to   >= ?{s0}))"
+            )
+        };
+        match p {
+            "VOUCHER" | "FREE_VOUCHER" => {
+                let frag = 있다(&mut args, Some(p));
+                sql.push_str(&format!(" AND {frag}"));
+            }
+            "BOTH" => {
+                let a = 있다(&mut args, Some("VOUCHER"));
+                let b = 있다(&mut args, Some("FREE_VOUCHER"));
+                sql.push_str(&format!(" AND {a} AND {b}"));
+            }
+            "NONE" => {
+                let frag = 있다(&mut args, None);
+                sql.push_str(&format!(" AND NOT {frag}"));
+            }
+            _ => {}
+        }
+    }
+    Ok((sql, args))
+}
+
+fn list_ordered(
+    conn: &Connection,
+    workspace_id: i64,
+    items: &[CostItem],
+    f: &EnrollmentFilter,
+    order: &str,
+) -> AppResult<Vec<Enrollment>> {
+    let year_id = year_of_workspace(conn, workspace_id)?;
+    let (where_sql, args) = build_where(conn, workspace_id, f)?;
+    let sql = format!("{RAW_SELECT}{where_sql}{order}");
 
     let mut st = conn.prepare(&sql)?;
     let refs: Vec<&dyn ToSql> = args.iter().map(|b| b.as_ref()).collect();
@@ -386,22 +448,7 @@ fn list_ordered(
     drop(st);
 
     let ws = workspace_dates(conn, year_id)?;
-    let rows = enrich(conn, raws, items, year_id, &ws)?;
-
-    // 지원유형 필터는 자격을 계산한 뒤에 거른다.
-    Ok(match f.program.as_deref() {
-        Some("VOUCHER") => rows
-            .into_iter()
-            .filter(|r| r.programs.iter().any(|p| p == "VOUCHER"))
-            .collect(),
-        Some("FREE_VOUCHER") => rows
-            .into_iter()
-            .filter(|r| r.programs.iter().any(|p| p == "FREE_VOUCHER"))
-            .collect(),
-        Some("BOTH") => rows.into_iter().filter(|r| r.programs.len() >= 2).collect(),
-        Some("NONE") => rows.into_iter().filter(|r| r.programs.is_empty()).collect(),
-        _ => rows,
-    })
+    enrich(conn, raws, items, year_id, &ws)
 }
 
 pub fn get(conn: &Connection, id: i64, items: &[CostItem]) -> AppResult<Enrollment> {
@@ -1168,4 +1215,196 @@ pub fn delete_all(conn: &Connection, workspace_id: i64) -> AppResult<usize> {
         "전체 삭제",
     )?;
     Ok(n)
+}
+
+// ─────────────────────────────────────────── 다중 정렬 · 쪽 나누기 (v0.1.6)
+
+/// 정렬 key 하나를 SQL 조각으로 바꾼다.
+///
+/// **화면이 보낸 글자를 SQL 에 그대로 넣지 않는다.** 여기 적힌 이름만 받아들이고
+/// 그 밖은 `None` 이다. 비용항목 열은 코드가 DB 의 `cost_item` 에서 오지만, 그래도
+/// 글자를 한 번 더 검사한 뒤에만 쓴다.
+fn sort_sql(key: &str, items: &[CostItem]) -> Option<Vec<String>> {
+    let one = |s: &str| Some(vec![s.to_string()]);
+    match key {
+        "grade" => return one("s.grade"),
+        // 반은 자연정렬 — `1, 2, 10, 가람`. 열이 둘이므로 따로 담는다.
+        // `01` 과 `1` 은 여전히 다른 값이다.
+        "classNo" => {
+            return Some(vec!["s.class_sort".to_string(), "s.class_no".to_string()])
+        }
+        "studentNo" => return one("s.student_no"),
+        "name" => return one("s.name"),
+        "dept" => return Some(vec!["d.name".to_string(), "d.class_name".to_string()]),
+        "status" => return one("e.status"),
+        "updatedAt" => return one("e.updated_at"),
+        "total" => {
+            return one(
+                "(SELECT COALESCE(SUM(c.amount), 0) FROM charge c WHERE c.enrollment_id = e.id)",
+            )
+        }
+        _ => {}
+    }
+
+    // 비용항목 한 칸 (강사료 · 수용비 · …)
+    let known = items.iter().any(|i| i.code == key);
+    let safe = key
+        .chars()
+        .all(|c| c.is_ascii_uppercase() || c == '_' || c.is_ascii_digit());
+    if known && safe {
+        return Some(vec![format!(
+            "(SELECT COALESCE(SUM(c.amount), 0) FROM charge c
+               WHERE c.enrollment_id = e.id AND c.item_code = '{key}')"
+        )]);
+    }
+    None
+}
+
+/// 사용자가 고른 차례를 `ORDER BY` 로 만든다.
+///
+/// 하나도 고르지 않았으면 **이 화면이 원래 쓰던 차례**를 그대로 쓴다.
+/// 맨 끝에는 언제나 `e.id` 를 붙인다 — 값이 같을 때 줄 차례가 실행마다 흔들리면
+/// 쪽을 넘길 때 같은 학생이 두 번 보이거나 빠진다.
+fn order_sql(sort: &[SortSpec], items: &[CostItem]) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    for s in sort.iter().take(MAX_SORT) {
+        let Some(expr) = sort_sql(&s.key, items) else {
+            continue;
+        };
+        let dir = if s.dir.eq_ignore_ascii_case("DESC") {
+            "DESC"
+        } else {
+            "ASC"
+        };
+        // 한 key 가 두 열로 펼쳐질 수 있다 (반 = class_sort, class_no)
+        for e in expr {
+            parts.push(format!("{e} {dir}"));
+        }
+    }
+    if parts.is_empty() {
+        return format!("{RAW_ORDER}, e.id");
+    }
+    format!(" ORDER BY {}, e.id", parts.join(", "))
+}
+
+/// 동시에 쓸 수 있는 정렬 조건 수.
+pub const MAX_SORT: usize = 5;
+
+/// 쪽 하나만 읽는다.
+///
+/// ```text
+/// WHERE(필터) → ORDER BY(다중 정렬) → LIMIT / OFFSET
+/// ```
+///
+/// 전체를 읽어 화면에서 자르지 않는다. 건수는 `COUNT(*)` 로 따로 센다.
+pub fn list_page(
+    conn: &Connection,
+    workspace_id: i64,
+    items: &[CostItem],
+    f: &EnrollmentFilter,
+    sort: &[SortSpec],
+    page: i64,
+    page_size: i64,
+) -> AppResult<EnrollmentPage> {
+    let page_size = page_size.clamp(1, 1000);
+    let year_id = year_of_workspace(conn, workspace_id)?;
+    let (where_sql, args) = build_where(conn, workspace_id, f)?;
+    let refs: Vec<&dyn ToSql> = args.iter().map(|b| b.as_ref()).collect();
+
+    // 건수 — 줄을 읽지 않고 센다.
+    let count_sql = format!(
+        "SELECT COUNT(*), COALESCE(SUM(CASE WHEN e.status = 'ACTIVE' THEN 1 ELSE 0 END), 0)
+           FROM enrollment e
+           JOIN student s    ON s.id = e.student_id
+           JOIN department d ON d.id = e.department_id{where_sql}"
+    );
+    let (total, active_total): (i64, i64) =
+        conn.query_row(&count_sql, refs.as_slice(), |r| Ok((r.get(0)?, r.get(1)?)))?;
+
+    let page_count = if total == 0 {
+        1
+    } else {
+        (total + page_size - 1) / page_size
+    };
+    // 자료가 줄어 지금 쪽이 사라졌으면 마지막 쪽을 준다 — 빈 화면을 보여 주지 않는다.
+    let page = page.clamp(1, page_count);
+    let offset = (page - 1) * page_size;
+
+    let sql = format!(
+        "{RAW_SELECT}{where_sql}{} LIMIT {page_size} OFFSET {offset}",
+        order_sql(sort, items)
+    );
+    let mut st = conn.prepare(&sql)?;
+    let raws = st
+        .query_map(refs.as_slice(), map_raw)?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    drop(st);
+
+    // 항목별 합계도 전체에서 낸다 — 쪽만의 합을 보여 주면 사실과 다르다.
+    let mut fee_sum: Vec<Fee> = Vec::new();
+    let mut amount_total = 0i64;
+    for it in items {
+        let sum_sql = format!(
+            "SELECT COALESCE(SUM(c.amount), 0)
+               FROM charge c
+               JOIN enrollment e ON e.id = c.enrollment_id
+               JOIN student s    ON s.id = e.student_id
+               JOIN department d ON d.id = e.department_id{where_sql}
+                AND e.status = 'ACTIVE' AND c.item_code = ?{}",
+            args.len() + 1
+        );
+        let mut with_code: Vec<&dyn ToSql> = refs.clone();
+        let code: &dyn ToSql = &it.code;
+        with_code.push(code);
+        let v: i64 = conn.query_row(&sum_sql, with_code.as_slice(), |r| r.get(0))?;
+        amount_total += v;
+        fee_sum.push(Fee {
+            item_code: it.code.clone(),
+            amount: v,
+        });
+    }
+
+    let ws = workspace_dates(conn, year_id)?;
+    let rows = enrich(conn, raws, items, year_id, &ws)?;
+
+    Ok(EnrollmentPage {
+        rows,
+        total,
+        active_total,
+        fees: fee_sum,
+        amount_total,
+        page,
+        page_size,
+        page_count,
+    })
+}
+
+/// 필터 드롭다운에 채울 값.
+///
+/// 예전에는 전체 명단을 한 번 더 읽어 여기서 뽑았다. 그러면 쪽을 나눠도 무거운
+/// 조회가 그대로 남는다.
+pub fn filter_options(
+    conn: &Connection,
+    workspace_id: i64,
+) -> AppResult<crate::model::EnrollmentFilterOptions> {
+    let mut st = conn.prepare(
+        "SELECT DISTINCT s.grade, s.class_no, s.class_sort
+           FROM enrollment e JOIN student s ON s.id = e.student_id
+          WHERE e.workspace_id = ?1
+          ORDER BY s.grade, s.class_sort, s.class_no",
+    )?;
+    let rows: Vec<(i64, String)> = st
+        .query_map(params![workspace_id], |r| Ok((r.get(0)?, r.get(1)?)))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    drop(st);
+
+    let mut grades: Vec<i64> = Vec::new();
+    let mut classes: Vec<crate::model::GradeClass> = Vec::new();
+    for (grade, class_no) in rows {
+        if !grades.contains(&grade) {
+            grades.push(grade);
+        }
+        classes.push(crate::model::GradeClass { grade, class_no });
+    }
+    Ok(crate::model::EnrollmentFilterOptions { grades, classes })
 }
