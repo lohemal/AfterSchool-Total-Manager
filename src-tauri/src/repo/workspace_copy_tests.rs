@@ -1043,3 +1043,128 @@ fn Excel은_현재_쪽이_아니라_필터_전체를_낸다() {
     assert_eq!(sheet.rows.len(), 250, "현재 쪽만 나왔다");
     assert_eq!(made.rows, 250);
 }
+
+/// 실제 신고(v0.1.6 후보)를 그대로 옮긴 재현 시험.
+///
+/// 학생 셋이 **서로 다른 방향으로** 금액을 고쳐 두었을 때, 새 작업공간의 금액이
+/// 셋 다 새 부서의 기준금액이어야 한다. 올린 것·내린 것·0원으로 만든 것을 모두
+/// 넣은 까닭은, 한 방향만 시험하면 "우연히 기준금액과 같았다"를 통과로 볼 수
+/// 있기 때문이다.
+///
+/// 저장된 행(`charge`)만 보지 않고 **화면이 읽는 길**(`list_page`)로도 확인한다.
+/// 신고가 'DB 는 맞는데 화면이 옛 금액을 보여 준다' 일 수도 있어서다.
+#[test]
+fn 학생별_수정금액_셋은_어느_것도_새_작업공간으로_넘어가지_않는다() {
+    let f = F::new();
+    let 기준 = f.ws("1기", "2026-03-01", "2026-03-31");
+    let 로봇 = f.dept(기준, "로봇과학", "B반", 기준금액());
+
+    let a = f.student(1, "1", 1, "학생가");
+    let b = f.student(1, "1", 2, "학생나");
+    let c = f.student(1, "1", 3, "학생다");
+    let ea = f.enroll(기준, a, 로봇);
+    let eb = f.enroll(기준, b, 로봇);
+    let ec = f.enroll(기준, c, 로봇);
+
+    // 가: 올림 · 나: 내림 · 다: 0원
+    let 고침 = |e: i64, 강사: i64| {
+        f.db.write(|c| {
+            repo::enrollment::update_fees(
+                c,
+                e,
+                &[
+                    fee(강사료, 강사),
+                    fee(수용비, 5_000),
+                    fee(교재비, 20_000),
+                    fee(재료비, 1_500),
+                ],
+                "시험",
+                &f.items,
+            )
+        })
+        .unwrap();
+    };
+    고침(ea, 500_000);
+    고침(eb, 30_000);
+    고침(ec, 0);
+
+    // 새 기간에는 기준금액 자체가 달라졌다 — 넘어온 금액과 헷갈리지 않는 값으로.
+    f.db.write(|c| {
+        repo::department::update(
+            c,
+            로봇,
+            &DepartmentInput {
+                name: "로봇과학".into(),
+                class_name: Some("B반".into()),
+                teacher: Some("김강사".into()),
+                days: Some("월,수".into()),
+                note: None,
+                fees: vec![
+                    fee(강사료, 77_000),
+                    fee(수용비, 5_000),
+                    fee(교재비, 20_000),
+                    fee(재료비, 1_500),
+                ],
+            },
+        )
+    })
+    .unwrap();
+
+    let (새, r) = f
+        .ws_copy(
+            "2기",
+            "2026-04-01",
+            "2026-04-30",
+            Some(가져오기(기준, true, true)),
+        )
+        .unwrap();
+    assert_eq!(r.enrollments, 3);
+
+    // ── 저장된 행
+    let 넘어온_수정 = f.한개(
+        "SELECT COUNT(*) FROM charge ch JOIN enrollment e ON e.id = ch.enrollment_id
+          WHERE e.workspace_id = ?1 AND ch.is_overridden = 1",
+        새,
+    );
+    assert_eq!(넘어온_수정, 0, "override 표시가 넘어왔다");
+
+    let 기준과_다른_칸 = f.한개(
+        "SELECT COUNT(*) FROM charge ch
+           JOIN enrollment e ON e.id = ch.enrollment_id
+           LEFT JOIN department_fee df
+                  ON df.department_id = e.department_id AND df.item_code = ch.item_code
+          WHERE e.workspace_id = ?1 AND ch.amount <> COALESCE(df.amount, 0)",
+        새,
+    );
+    assert_eq!(기준과_다른_칸, 0, "새 부서 기준금액과 다른 금액이 있다");
+
+    // ── 화면이 읽는 길
+    let page = f.쪽(새, &EnrollmentFilter::default(), &[], 1, 100);
+    assert_eq!(page.total, 3);
+    for row in &page.rows {
+        let 강사 = row
+            .fees
+            .iter()
+            .find(|x| x.item_code == 강사료)
+            .map(|x| x.amount)
+            .unwrap_or(-1);
+        assert_eq!(강사, 77_000, "{} 의 강사료가 새 기준금액이 아니다", row.name);
+        assert!(!row.has_override, "{} 에 수정 표시가 남았다", row.name);
+    }
+
+    // ── 기준 작업공간은 그대로다
+    let 옛것 = f.쪽(기준, &EnrollmentFilter::default(), &[], 1, 100);
+    let mut 옛_강사: Vec<i64> = 옛것
+        .rows
+        .iter()
+        .map(|r| {
+            r.fees
+                .iter()
+                .find(|x| x.item_code == 강사료)
+                .map(|x| x.amount)
+                .unwrap_or(-1)
+        })
+        .collect();
+    옛_강사.sort();
+    assert_eq!(옛_강사, vec![0, 30_000, 500_000], "기준 작업공간이 바뀌었다");
+}

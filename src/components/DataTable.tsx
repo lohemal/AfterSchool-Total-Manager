@@ -7,7 +7,7 @@
  */
 
 import { useMemo, useState, type ReactNode } from 'react'
-import { compareClassNo } from '@/lib/format'
+import { compareClassNo, compareDays } from '@/lib/format'
 import { isControlPath } from '@/lib/rowAction'
 import { applySort, sortMark, toggleSort as toggle, type SortSpec } from '@/lib/sortSpec'
 
@@ -250,4 +250,6 @@ export const cmp = {
    * 그냥 `text` 를 쓰면 `1, 10, 2` 가 되어 숫자 반 학교의 쓰임새가 나빠진다.
    */
   classNo: <T,>(pick: (r: T) => string) => (a: T, b: T) => compareClassNo(pick(a), pick(b)),
+  /** 요일 전용. 가나다순이 아니라 `월 화 수 목 금 토 일` 차례다. */
+  days: <T,>(pick: (r: T) => string) => (a: T, b: T) => compareDays(pick(a), pick(b)),
 }

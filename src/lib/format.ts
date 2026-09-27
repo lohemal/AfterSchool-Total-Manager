@@ -122,3 +122,53 @@ export function fundTone(code: string): string {
       return 'tag--plain'
   }
 }
+
+/**
+ * 요일 차례 — 가나다순이 아니라 **업무상 주간 차례**다.
+ *
+ * `금 · 월 · 수` 를 가나다순으로 놓으면 시간표를 읽는 눈과 어긋난다. 담당자는
+ * 늘 월요일부터 보므로 `월 화 수 목 금 토 일` 로 놓는다. 내림차순은 이
+ * 비교기를 뒤집은 것이라 저절로 `일 토 금 목 수 화 월` 이 된다.
+ */
+const DAY_ORDER = '월화수목금토일'
+
+/**
+ * 요일 칸의 글을 요일 목록으로 읽는다.
+ *
+ * 요일은 자유 입력 글자열이다(`월,수`). 쉼표뿐 아니라 가운뎃점·빗금·빈칸으로
+ * 적는 사람도 있고 `월요일` 처럼 길게 적는 사람도 있어서, 한글이 아닌 글자를
+ * 모두 구분자로 보고 토막마다 **첫 글자**만 본다. 요일이 아닌 토막은 버린다.
+ */
+export function parseDays(days: string): string[] {
+  return days
+    .split(/[^가-힣]+/)
+    .filter(Boolean)
+    .map((t) => t[0])
+    .filter((c) => DAY_ORDER.includes(c))
+}
+
+/**
+ * 요일 두 칸의 차례를 견준다. `Array.prototype.sort` 에 그대로 넘길 수 있다.
+ *
+ * 여러 요일이 적혀 있으면 **이른 요일부터** 견준다 — `월,수` 가 `화` 보다 앞,
+ * `월` 이 `월,수` 보다 앞이다. 비어 있거나 요일로 읽히지 않는 칸은 오름차순에서
+ * 맨 뒤에 둔다.
+ */
+export function compareDays(a: string, b: string): number {
+  const ka = parseDays(a)
+    .map((d) => DAY_ORDER.indexOf(d))
+    .sort((x, y) => x - y)
+  const kb = parseDays(b)
+    .map((d) => DAY_ORDER.indexOf(d))
+    .sort((x, y) => x - y)
+
+  if (ka.length === 0 || kb.length === 0) {
+    if (ka.length !== kb.length) return ka.length === 0 ? 1 : -1
+    return a < b ? -1 : a > b ? 1 : 0
+  }
+  for (let i = 0; i < Math.min(ka.length, kb.length); i++) {
+    if (ka[i] !== kb[i]) return ka[i] - kb[i]
+  }
+  if (ka.length !== kb.length) return ka.length - kb.length
+  return a < b ? -1 : a > b ? 1 : 0
+}

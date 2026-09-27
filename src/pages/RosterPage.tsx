@@ -219,6 +219,8 @@ export function RosterPage() {
       key: 'status',
       head: '상태',
       width: 72,
+      // 차례는 서버가 매긴다(whitelist 의 status). 비교기 대신 sortable 로 머리글만 연다.
+      sortable: true,
       render: (e) =>
         e.status === 'ACTIVE' ? (
           <span className="tag tag--free">수강중</span>

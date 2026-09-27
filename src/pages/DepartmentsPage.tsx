@@ -94,9 +94,28 @@ export function DepartmentsPage() {
 
   const columns: Column<Department>[] = [
     { key: 'name', head: '부서명', width: 130, sort: cmp.text((d) => d.name), render: (d) => d.name },
-    { key: 'className', head: '반명', width: 80, render: (d) => d.className || <span className="muted">—</span> },
-    { key: 'teacher', head: '강사명', width: 90, render: (d) => d.teacher || <span className="muted">—</span> },
-    { key: 'days', head: '요일', width: 90, render: (d) => d.days || <span className="muted">—</span> },
+    {
+      key: 'className',
+      head: '반명',
+      width: 80,
+      // 반명도 학생 반과 같은 natural sort 를 쓴다 — 'A반 1, 2, 10' 이 'A반 1, 10, 2' 가 되지 않도록.
+      sort: cmp.classNo((d) => d.className),
+      render: (d) => d.className || <span className="muted">—</span>,
+    },
+    {
+      key: 'teacher',
+      head: '강사명',
+      width: 90,
+      sort: cmp.text((d) => d.teacher),
+      render: (d) => d.teacher || <span className="muted">—</span>,
+    },
+    {
+      key: 'days',
+      head: '요일',
+      width: 90,
+      sort: cmp.days((d) => d.days),
+      render: (d) => d.days || <span className="muted">—</span>,
+    },
     ...items.map<Column<Department>>((it) => ({
       key: it.code,
       head: it.name,
