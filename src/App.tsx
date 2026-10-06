@@ -17,6 +17,7 @@ import { PolicyPage } from '@/pages/PolicyPage'
 import { FreeVoucherPage, VoucherPage } from '@/pages/ProgramResultPage'
 import { FeeReportPage } from '@/pages/FeeReportPage'
 import { ProposalPage } from '@/pages/ProposalPage'
+import { CapacityPage } from '@/pages/CapacityPage'
 import { RosterPage } from '@/pages/RosterPage'
 import { SelfPayPage } from '@/pages/SelfPayPage'
 import { SettlementPage } from '@/pages/SettlementPage'
@@ -84,6 +85,7 @@ function Shell({ onYearCreated }: { onYearCreated: () => void }) {
           <Route path="departments" element={<Guard>{<DepartmentsPage />}</Guard>} />
 
           <Route path="roster" element={<Guard>{<RosterPage />}</Guard>} />
+          <Route path="capacity" element={<Guard>{<CapacityPage />}</Guard>} />
           <Route path="student-detail" element={<Guard>{<StudentDetailPage />}</Guard>} />
           <Route path="adjustments" element={<Guard>{<AdjustmentPage />}</Guard>} />
           <Route path="changes" element={<Guard>{<ChangeLogPage />}</Guard>} />

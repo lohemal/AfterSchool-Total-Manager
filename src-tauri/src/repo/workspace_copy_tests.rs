@@ -106,6 +106,8 @@ impl F {
                         days: Some("월,수".into()),
                         note: None,
                         fees,
+                        capacity: None,
+                        allowed_grades: Vec::new(),
                     },
                 )
             })
@@ -354,6 +356,8 @@ fn 새_부서는_새_행이고_옛_부서와_독립이다() {
                 days: None,
                 note: None,
                 fees: vec![fee(강사료, 200_000)],
+                capacity: None,
+                allowed_grades: Vec::new(),
             },
         )
     })
@@ -1105,6 +1109,8 @@ fn 학생별_수정금액_셋은_어느_것도_새_작업공간으로_넘어가�
                     fee(교재비, 20_000),
                     fee(재료비, 1_500),
                 ],
+                capacity: None,
+                allowed_grades: Vec::new(),
             },
         )
     })
@@ -1167,4 +1173,144 @@ fn 학생별_수정금액_셋은_어느_것도_새_작업공간으로_넘어가�
         .collect();
     옛_강사.sort();
     assert_eq!(옛_강사, vec![0, 30_000, 500_000], "기준 작업공간이 바뀌었다");
+}
+
+/// 정원과 수강 가능 학년도 새 작업공간으로 함께 온다 (v0.1.7).
+///
+/// 학년은 **새 부서 id 로 다시 만들어야** 한다. 옛 id 를 가리키는 줄이 하나라도
+/// 남으면 기준 작업공간의 부서를 지웠을 때 새 작업공간의 대상 학년이 함께
+/// 사라진다.
+#[test]
+fn 정원과_수강_가능_학년도_가져온다() {
+    let f = F::new();
+    let 기준 = f.ws("1기", "2026-03-01", "2026-03-31");
+    let 로봇 = f.db
+        .write(|c| {
+            repo::department::create(
+                c,
+                기준,
+                &DepartmentInput {
+                    name: "로봇과학".into(),
+                    class_name: Some("A반".into()),
+                    teacher: Some("김강사".into()),
+                    days: Some("월,수".into()),
+                    note: None,
+                    fees: 기준금액(),
+                    capacity: Some(20),
+                    allowed_grades: vec![1, 2, 4],
+                },
+            )
+        })
+        .unwrap();
+    // 정원을 정하지 않은 반도 그대로 미설정으로 와야 한다
+    f.dept(기준, "미술", "A반", vec![fee(강사료, 40_000)]);
+
+    let a = f.student(1, "1", 1, "홍길동");
+    f.enroll(기준, a, 로봇);
+
+    let (새, out) = f
+        .ws_copy(
+            "2기",
+            "2026-04-01",
+            "2026-04-30",
+            Some(가져오기(기준, true, true)),
+        )
+        .unwrap();
+    assert_eq!(out.departments, 2);
+
+    let 새목록 = f
+        .db
+        .read(|c| repo::department::list(c, 새, None))
+        .unwrap();
+    let 새로봇 = 새목록
+        .iter()
+        .find(|d| d.name == "로봇과학")
+        .expect("로봇과학이 오지 않았다");
+    assert_eq!(새로봇.capacity, Some(20));
+    assert_eq!(
+        새로봇.allowed_grades,
+        vec![1, 2, 4],
+        "1·2·4 가 그대로 오지 않았다"
+    );
+
+    let 새미술 = 새목록.iter().find(|d| d.name == "미술").unwrap();
+    assert_eq!(새미술.capacity, None, "미설정이 0 으로 바뀌었다");
+    assert!(새미술.allowed_grades.is_empty());
+
+    // 옛 부서 id 를 가리키는 학년 줄이 새 작업공간에 없어야 한다
+    let 옛참조 = f.한개(
+        "SELECT COUNT(*) FROM department_allowed_grade g
+           JOIN department d ON d.id = g.department_id
+          WHERE d.workspace_id = ?1 AND g.department_id = (
+                SELECT id FROM department WHERE workspace_id = 1 AND name = '로봇과학')",
+        새,
+    );
+    assert_eq!(옛참조, 0);
+    let 새학년줄 = f.한개(
+        "SELECT COUNT(*) FROM department_allowed_grade g
+           JOIN department d ON d.id = g.department_id
+          WHERE d.workspace_id = ?1",
+        새,
+    );
+    assert_eq!(새학년줄, 3, "학년 줄이 3개가 아니다");
+
+    // 기준 작업공간은 그대로다
+    let 기준목록 = f
+        .db
+        .read(|c| repo::department::list(c, 기준, None))
+        .unwrap();
+    let 기준로봇 = 기준목록.iter().find(|d| d.name == "로봇과학").unwrap();
+    assert_eq!(기준로봇.capacity, Some(20));
+    assert_eq!(기준로봇.allowed_grades, vec![1, 2, 4]);
+
+    // 가져온 수강의 금액은 v0.1.6 규칙 그대로 — 새 부서 기준금액에서 시작
+    let 넘어온_수정 = f.한개(
+        "SELECT COUNT(*) FROM charge ch JOIN enrollment e ON e.id = ch.enrollment_id
+          WHERE e.workspace_id = ?1 AND ch.is_overridden = 1",
+        새,
+    );
+    assert_eq!(넘어온_수정, 0);
+}
+
+/// 기준 부서를 지워도 새 작업공간의 대상 학년은 남는다 — 참조가 끊겨 있다는 증거.
+#[test]
+fn 기준_부서를_지워도_새_작업공간의_학년은_남는다() {
+    let f = F::new();
+    let 기준 = f.ws("1기", "2026-03-01", "2026-03-31");
+    let 로봇 = f.db
+        .write(|c| {
+            repo::department::create(
+                c,
+                기준,
+                &DepartmentInput {
+                    name: "로봇과학".into(),
+                    class_name: Some("A반".into()),
+                    teacher: None,
+                    days: Some("월".into()),
+                    note: None,
+                    fees: 기준금액(),
+                    capacity: Some(20),
+                    allowed_grades: vec![3, 5],
+                },
+            )
+        })
+        .unwrap();
+
+    let (새, _) = f
+        .ws_copy("2기", "2026-04-01", "2026-04-30", Some(가져오기(기준, true, false)))
+        .unwrap();
+
+    f.db.write(|c| repo::department::delete_many(c, &[로봇]))
+        .unwrap();
+
+    let 새목록 = f.db.read(|c| repo::department::list(c, 새, None)).unwrap();
+    assert_eq!(새목록.len(), 1);
+    assert_eq!(새목록[0].allowed_grades, vec![3, 5]);
+
+    // 외래키가 깨지지 않았다
+    let 위반 = f.한개(
+        "SELECT COUNT(*) FROM pragma_foreign_key_check WHERE ?1 = ?1",
+        새,
+    );
+    assert_eq!(위반, 0);
 }

@@ -380,6 +380,8 @@ fn 부서_수강료는_항목별_행으로_저장된다() {
             Fee { item_code: "INSTRUCTOR".into(), amount: 40_000 },
             Fee { item_code: "TEXTBOOK".into(), amount: 30_000 },
         ],
+        capacity: None,
+        allowed_grades: Vec::new(),
     };
     db.write(|c| repo::department::create(c, wsid, &input)).unwrap();
 
@@ -417,6 +419,8 @@ fn 자료_버전은_트리거로_올라간다() {
                 days: None,
                 note: None,
                 fees: vec![Fee { item_code: "INSTRUCTOR".into(), amount: 25_000 }],
+                capacity: None,
+                allowed_grades: Vec::new(),
             },
         )
     })

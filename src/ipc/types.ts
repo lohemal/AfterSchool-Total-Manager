@@ -110,6 +110,10 @@ export interface Department {
   note: string
   fees: Fee[]
   total: number
+  /** 정원. null 이면 **미설정** — 0명이 아니다 */
+  capacity: number | null
+  /** 수강 가능 학년. **빈 배열이면 미설정** — 전 학년도 전 학년 불가도 아니다 */
+  allowedGrades: number[]
   enrollmentCount: number
 }
 
@@ -120,6 +124,8 @@ export interface DepartmentInput {
   days?: string
   note?: string
   fees: Fee[]
+  capacity: number | null
+  allowedGrades: number[]
 }
 
 export interface Period {
@@ -782,4 +788,94 @@ export interface GradeClass {
 export interface EnrollmentFilterOptions {
   grades: number[]
   classes: GradeClass[]
+}
+
+// ─────────────────────────────────────────────── 부서별 수강현황 (v0.1.7)
+
+export type CapacityStatus = 'UNSET' | 'OPEN' | 'FULL' | 'OVER'
+
+export interface DeptCapacityRow {
+  departmentId: number
+  name: string
+  className: string
+  teacher: string
+  days: string
+  /** 빈 배열이면 대상 학년 미설정 */
+  allowedGrades: number[]
+  capacity: number | null
+  currentCount: number
+  /** 정원 미설정이면 null. 넘쳤으면 음수 그대로 */
+  remaining: number | null
+  fillRate: number | null
+  status: CapacityStatus
+}
+
+export interface CapacitySummary {
+  classes: number
+  classesWithCapacity: number
+  classesWithoutCapacity: number
+  totalCapacity: number
+  countedCurrent: number
+  totalEnrollments: number
+  totalStudents: number
+  /** sum(max(정원 - 현재, 0)) — 실제로 더 받을 수 있는 자리 */
+  openSeats: number
+  avgFillRate: number | null
+  overClasses: number
+}
+
+export interface GradeStatRow {
+  grade: number
+  students: number
+  enrollments: number
+  totalStudents: number
+  joinRate: number | null
+}
+
+export interface WeekdayStatRow {
+  day: string
+  classes: number
+  enrollments: number
+  classesWithCapacity: number
+  totalCapacity: number
+  openSeats: number
+}
+
+export interface CapacityStats {
+  summary: CapacitySummary
+  rows: DeptCapacityRow[]
+  grades: GradeStatRow[]
+  weekdays: WeekdayStatRow[]
+}
+
+export type SeatFinding = 'OPEN' | 'CAPACITY_UNKNOWN' | 'GRADE_UNKNOWN' | 'FULL' | 'OVER'
+
+export interface SeatRow {
+  departmentId: number
+  name: string
+  className: string
+  teacher: string
+  days: string
+  allowedGrades: number[]
+  capacity: number | null
+  currentCount: number
+  remaining: number | null
+  finding: SeatFinding
+}
+
+export interface SeatQuery {
+  grade: number
+  studentId: number | null
+  includeClosed: boolean
+}
+
+export interface SeatDayGroup {
+  day: string
+  rows: SeatRow[]
+}
+
+export interface SeatResult {
+  byDay: SeatDayGroup[]
+  /** 고른 학생이 이미 듣고 있어 뺀 반 */
+  excluded: string[]
 }

@@ -807,3 +807,75 @@
     transform: rotate(360deg);
   }
 }
+
+/* ─────────────────────────────── 운영 조건 입력 (v0.1.7) */
+
+/* 입력 칸과 단위·곁단추를 한 줄에 둔다. 줄바꿈이 필요하면 쓰는 쪽에서 편다. */
+.inlineRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* 학년 체크. 글자와 네모가 같이 눌려야 누르기 쉽다. */
+.checkItem {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px 3px 6px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+.checkItem:hover {
+  border-color: var(--brand);
+}
+.checkItem input {
+  margin: 0;
+  cursor: pointer;
+}
+
+/* ─────────────────────────────── 부서별 수강현황 (v0.1.7) */
+
+/* 요약 카드 한 줄. 좁아지면 접힌다. */
+.statRow {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.statCard {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  padding: 10px 12px;
+}
+.statCard__label {
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+.statCard__value {
+  font-size: 20px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.statCard__sub {
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 3px;
+}
+
+/* 요일 묶음 제목 — 수강 가능 부서 찾기 */
+.dayGroup {
+  margin-bottom: 14px;
+}
+.dayGroup__head {
+  font-weight: 700;
+  margin-bottom: 6px;
+  padding-bottom: 4px;
+  border-bottom: 2px solid var(--line);
+}

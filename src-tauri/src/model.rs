@@ -132,6 +132,10 @@ pub struct Department {
     pub note: String,
     pub fees: Vec<Fee>,
     pub total: i64,
+    /// 정원. `None` 이면 **미설정** — 0명이 아니다.
+    pub capacity: Option<i64>,
+    /// 수강 가능 학년. **빈 목록이면 미설정** — 전 학년도 전 학년 불가도 아니다.
+    pub allowed_grades: Vec<i64>,
     /// 이 부서를 수강 중인 학생 수 (ACTIVE)
     pub enrollment_count: i64,
 }
@@ -145,6 +149,12 @@ pub struct DepartmentInput {
     pub days: Option<String>,
     pub note: Option<String>,
     pub fees: Vec<Fee>,
+    /// 정원. `None` 이면 미설정. 1 미만은 받지 않는다.
+    #[serde(default)]
+    pub capacity: Option<i64>,
+    /// 수강 가능 학년. 빈 목록이면 미설정.
+    #[serde(default)]
+    pub allowed_grades: Vec<i64>,
 }
 
 /// 지원정책 (연간한도 · 이월 · 대상학년 + 지원기간 목록)
@@ -956,4 +966,166 @@ pub struct EnrollmentFilterOptions {
 pub struct GradeClass {
     pub grade: i64,
     pub class_no: String,
+}
+
+// ─────────────────────────────────────────────── 부서별 수강현황 (v0.1.7)
+
+/// 정원 대비 상태. 화면에서 색만으로 구분하지 않도록 **글로도 적는다.**
+///
+/// '부족'이라 하지 않는다 — 방과후는 정원을 꼭 채워야 하는 사업이 아니다.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum CapacityStatus {
+    /// 정원을 정하지 않았다
+    Unset,
+    /// 아직 자리가 있다
+    Open,
+    /// 정확히 정원까지 찼다
+    Full,
+    /// 정원을 넘겼다
+    Over,
+}
+
+/// 부서(반) 한 줄의 수강현황.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeptCapacityRow {
+    pub department_id: i64,
+    pub name: String,
+    pub class_name: String,
+    pub teacher: String,
+    pub days: String,
+    /// 빈 목록이면 **대상 학년 미설정**
+    pub allowed_grades: Vec<i64>,
+    pub capacity: Option<i64>,
+    /// ACTIVE 수강 건수. 같은 학생이 같은 반에 두 번 ACTIVE 일 수 없으므로
+    /// (`enrollment_active_uq`) 이 값은 곧 학생 수이기도 하다.
+    pub current_count: i64,
+    /// 정원 미설정이면 `None`. **넘쳤으면 음수 그대로** 둔다.
+    pub remaining: Option<i64>,
+    /// 충원율(%). 소수 첫째 자리까지. 정원 미설정이면 `None`.
+    pub fill_rate: Option<f64>,
+    pub status: CapacityStatus,
+}
+
+/// 윗줄 요약.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CapacitySummary {
+    pub classes: i64,
+    pub classes_with_capacity: i64,
+    pub classes_without_capacity: i64,
+    /// **정원을 정한 반만** 더한 값
+    pub total_capacity: i64,
+    /// 정원을 정한 반의 현재 수강 건수
+    pub counted_current: i64,
+    /// 전체 ACTIVE 수강 건수 (정원 미설정 반 포함)
+    pub total_enrollments: i64,
+    /// 전체 ACTIVE 수강 학생 수 (한 학생이 셋을 들어도 1)
+    pub total_students: i64,
+    /// 실제로 더 받을 수 있는 자리 — `sum(max(정원 - 현재, 0))`.
+    /// 넘친 반의 음수가 다른 반의 빈자리를 깎아먹지 않게 한다.
+    pub open_seats: i64,
+    /// 정원을 정한 반의 평균 충원율(%)
+    pub avg_fill_rate: Option<f64>,
+    pub over_classes: i64,
+}
+
+/// 학년별 현황 한 줄.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GradeStatRow {
+    pub grade: i64,
+    /// 그 학년에서 방과후를 듣는 학생 수 (DISTINCT student_id)
+    pub students: i64,
+    /// 수강 건수 (한 학생이 셋을 들으면 3)
+    pub enrollments: i64,
+    /// 학년도에 등록된 그 학년 전체 학생 수
+    pub total_students: i64,
+    /// 참여율(%) = students / total_students. 분모가 0이면 `None`.
+    pub join_rate: Option<f64>,
+}
+
+/// 요일별 현황 한 줄.
+///
+/// **여러 요일에 운영하는 반은 각 요일에 모두 센다.** 그래서 이 표의 세로
+/// 합계는 전체 수강 건수보다 클 수 있다 (`CapacityStats::weekday_note`).
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WeekdayStatRow {
+    /// `월`…`일`, 또는 요일을 읽을 수 없는 반을 모은 `미지정`
+    pub day: String,
+    pub classes: i64,
+    pub enrollments: i64,
+    pub classes_with_capacity: i64,
+    pub total_capacity: i64,
+    pub open_seats: i64,
+}
+
+/// `부서별 수강현황` 화면 한 벌.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CapacityStats {
+    pub summary: CapacitySummary,
+    pub rows: Vec<DeptCapacityRow>,
+    pub grades: Vec<GradeStatRow>,
+    pub weekdays: Vec<WeekdayStatRow>,
+}
+
+/// 수강 가능 부서 찾기 한 줄의 판정.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum SeatFinding {
+    /// 대상 학년이고 정원도 정해져 있고 자리도 있다
+    Open,
+    /// 대상 학년이지만 정원을 정하지 않아 자리를 셀 수 없다
+    CapacityUnknown,
+    /// 수강 가능 학년이 미설정이라 이 학년이 대상인지 알 수 없다
+    GradeUnknown,
+    /// 대상 학년인데 정원까지 찼다
+    Full,
+    /// 대상 학년인데 정원을 넘겼다
+    Over,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SeatRow {
+    pub department_id: i64,
+    pub name: String,
+    pub class_name: String,
+    pub teacher: String,
+    pub days: String,
+    pub allowed_grades: Vec<i64>,
+    pub capacity: Option<i64>,
+    pub current_count: i64,
+    pub remaining: Option<i64>,
+    pub finding: SeatFinding,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SeatQuery {
+    pub grade: i64,
+    /// 고르면 그 학생이 **이미 수강 중인 반**을 뺀다. 조회만 한다.
+    pub student_id: Option<i64>,
+    /// 켜면 정원 도달·초과 반도 함께 보여 준다
+    #[serde(default)]
+    pub include_closed: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SeatResult {
+    /// 요일별로 묶은 결과. `날짜 없음` 은 `미지정` 으로 모은다.
+    pub by_day: Vec<SeatDayGroup>,
+    /// 학생을 골라 제외한 반의 이름표 — 왜 안 보이는지 알려 주기 위해
+    pub excluded: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SeatDayGroup {
+    pub day: String,
+    pub rows: Vec<SeatRow>,
 }

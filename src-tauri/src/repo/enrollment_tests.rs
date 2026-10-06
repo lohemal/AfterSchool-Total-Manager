@@ -85,6 +85,8 @@ impl Fixture {
                         days: None,
                         note: None,
                         fees,
+                        capacity: None,
+                        allowed_grades: Vec::new(),
                     },
                 )
             })
@@ -188,6 +190,8 @@ fn 전체_흐름_부서금액_변경이_기존_학생에게_저절로_옮겨가�
                 days: None,
                 note: None,
                 fees: vec![fee(INSTRUCTOR, 50_000), fee(TEXTBOOK, 30_000)],
+                capacity: None,
+                allowed_grades: Vec::new(),
             },
         )
     })
@@ -304,6 +308,8 @@ fn 고른_칸만_반영할_수_있다() {
                 days: None,
                 note: None,
                 fees: vec![fee(INSTRUCTOR, 30_000)],
+                capacity: None,
+                allowed_grades: Vec::new(),
             },
         )
     })

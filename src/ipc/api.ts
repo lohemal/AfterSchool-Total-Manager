@@ -8,6 +8,9 @@ import { invoke } from '@tauri-apps/api/core'
 import type { SortSpec } from '@/lib/sortSpec'
 
 import type {
+  CapacityStats,
+  SeatQuery,
+  SeatResult,
   AppInfo,
   ApplyMode,
   ApplyResult,
@@ -149,6 +152,13 @@ export const api = {
   departmentDelete: (ids: number[]) => invoke<number>('department_delete', { ids }),
   departmentDeleteAll: (workspaceId: number) =>
     invoke<BulkDeleteResult>('department_delete_all', { workspaceId }),
+  capacityStats: (workspaceId: number) =>
+    invoke<CapacityStats>('capacity_stats', { workspaceId }),
+  capacityFindSeats: (workspaceId: number, query: SeatQuery) =>
+    invoke<SeatResult>('capacity_find_seats', { workspaceId, query }),
+  /** 화면 필터와 무관하게 작업공간 전체를 낸다 */
+  capacityExport: (workspaceId: number) =>
+    invoke<ExportResult>('capacity_export', { workspaceId }),
 
   // 지원금 정책 (설정 화면은 Phase 3)
   policyList: (yearId: number) => invoke<PolicyView[]>('policy_list', { yearId }),

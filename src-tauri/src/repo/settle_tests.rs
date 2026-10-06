@@ -96,6 +96,8 @@ impl S {
                         days: None,
                         note: None,
                         fees,
+                        capacity: None,
+                        allowed_grades: Vec::new(),
                     },
                 )
             })

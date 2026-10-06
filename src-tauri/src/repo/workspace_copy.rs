@@ -144,6 +144,12 @@ pub fn run(
                 days: Some(d.days.clone()),
                 note: Some(d.note.clone()),
                 fees: d.fees.clone(),
+                // 정원과 수강 가능 학년도 함께 온다. 둘 다 그 반을 어떻게
+                // 운영하는지에 대한 설명이라, 기수가 바뀐다고 처음부터 다시
+                // 정할 일이 아니다. 학년은 **새 부서 id 로 다시 만든다** —
+                // `department::create` 가 옛 id 를 가리키지 않게 새로 쓴다.
+                capacity: d.capacity,
+                allowed_grades: d.allowed_grades.clone(),
             },
         )?;
         dept_map.insert(d.id, new_id);

@@ -65,7 +65,7 @@ pub fn student_label(grade: i64, class_no: &str, student_no: i64, name: &str) ->
 }
 
 /// `강사료 40,000 · 수용비 0 · 교재비 30,000 · 재료비 0` — 이력의 이전값/변경값.
-fn fees_text(items: &[CostItem], fees: &[Fee]) -> String {
+pub(crate) fn fees_text(items: &[CostItem], fees: &[Fee]) -> String {
     items
         .iter()
         .map(|it| {
@@ -305,7 +305,7 @@ fn workspace_dates(conn: &Connection, year_id: i64) -> AppResult<HashMap<i64, (S
     Ok(rows.into_iter().collect())
 }
 
-fn year_of_workspace(conn: &Connection, workspace_id: i64) -> AppResult<i64> {
+pub(crate) fn year_of_workspace(conn: &Connection, workspace_id: i64) -> AppResult<i64> {
     conn.query_row(
         "SELECT year_id FROM workspace WHERE id = ?1",
         params![workspace_id],

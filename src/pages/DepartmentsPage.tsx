@@ -19,6 +19,7 @@ import { Button, Card, Empty, Field, Input, MoneyInput, Notice, Search } from '@
 import { api, errorMessage } from '@/ipc/api'
 import type { Department, DepartmentInput, Fee } from '@/ipc/types'
 import { won } from '@/lib/format'
+import { GRADES, gradeText, toggleGrade } from '@/lib/grades'
 import type { SortSpec } from '@/lib/sortSpec'
 import { useApp } from '@/lib/useApp'
 
@@ -115,6 +116,29 @@ export function DepartmentsPage() {
       width: 90,
       sort: cmp.days((d) => d.days),
       render: (d) => d.days || <span className="muted">—</span>,
+    },
+    {
+      key: 'capacity',
+      head: '정원',
+      align: 'num',
+      width: 70,
+      // 미설정을 0 으로 정렬하면 '정원 0명인 반'처럼 보인다. 맨 뒤로 보낸다.
+      sort: cmp.num((d) => d.capacity ?? Number.MAX_SAFE_INTEGER),
+      render: (d) =>
+        d.capacity === null ? <span className="muted">미설정</span> : `${d.capacity}명`,
+    },
+    {
+      key: 'allowedGrades',
+      head: '대상 학년',
+      width: 110,
+      // 띄엄띄엄한 학년도 그대로 — `1·2·4학년` 을 `1~4학년` 으로 줄이지 않는다.
+      sort: cmp.text((d) => gradeText(d.allowedGrades)),
+      render: (d) =>
+        d.allowedGrades.length === 0 ? (
+          <span className="muted">미설정</span>
+        ) : (
+          gradeText(d.allowedGrades)
+        ),
     },
     ...items.map<Column<Department>>((it) => ({
       key: it.code,
@@ -379,6 +403,8 @@ function DepartmentModal({
       itemCode: it.code,
       amount: value?.fees.find((f) => f.itemCode === it.code)?.amount ?? 0,
     })),
+    capacity: value?.capacity ?? null,
+    allowedGrades: value?.allowedGrades ?? [],
   })
 
   const total = form.fees.reduce((s, f) => s + f.amount, 0)
@@ -445,6 +471,79 @@ function DepartmentModal({
             onChange={(e) => setForm({ ...form, days: e.target.value })}
           />
         </Field>
+      </div>
+
+      <div style={{ height: 16 }} />
+      <div className="card__title" style={{ marginBottom: 8 }}>
+        운영 조건
+      </div>
+      <div className="formRow">
+        <label className="field__label">정원</label>
+        <div className="inlineRow">
+          <Input
+            type="number"
+            min={1}
+            style={{ width: 96 }}
+            value={form.capacity ?? ''}
+            placeholder="미설정"
+            onChange={(e) => {
+              // 비우면 **미설정**이다. 0 으로 적어 두면 충원율이 거짓으로
+              // 100% 가 되므로 빈 칸과 0 을 또렷이 가른다.
+              const v = e.target.value.trim()
+              setForm({ ...form, capacity: v === '' ? null : Number(v) })
+            }}
+          />
+          <span className="muted">명</span>
+          {form.capacity !== null && (
+            <button type="button" className="linkBtn" onClick={() => setForm({ ...form, capacity: null })}>
+              미설정으로
+            </button>
+          )}
+        </div>
+      </div>
+      <div className="hint" style={{ marginBottom: 10 }}>
+        비워 두면 <b>정원 미설정</b>입니다. 남은 자리와 충원율을 세지 않습니다.
+      </div>
+
+      <div className="formRow">
+        <label className="field__label">수강 가능 학년</label>
+        <div>
+          <div className="inlineRow" style={{ flexWrap: 'wrap' }}>
+            {GRADES.map((g) => (
+              <label key={g} className="checkItem">
+                <input
+                  type="checkbox"
+                  checked={form.allowedGrades.includes(g)}
+                  onChange={() =>
+                    setForm({ ...form, allowedGrades: toggleGrade(form.allowedGrades, g) })
+                  }
+                />
+                {g}학년
+              </label>
+            ))}
+            <span className="toolbar__spacer" />
+            <button
+              type="button"
+              className="linkBtn"
+              onClick={() => setForm({ ...form, allowedGrades: [...GRADES] })}
+            >
+              전체 선택
+            </button>
+            <button
+              type="button"
+              className="linkBtn"
+              onClick={() => setForm({ ...form, allowedGrades: [] })}
+            >
+              전체 해제
+            </button>
+          </div>
+          <div className="hint" style={{ marginTop: 6 }}>
+            지금 설정: <b>{gradeText(form.allowedGrades)}</b>
+            {form.allowedGrades.length === 0 && (
+              <> — 모두 해제하면 <b>미설정</b>입니다. ‘전 학년 불가’가 아닙니다.</>
+            )}
+          </div>
+        </div>
       </div>
 
       <div style={{ height: 16 }} />

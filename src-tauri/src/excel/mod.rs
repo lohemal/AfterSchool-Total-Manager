@@ -7,6 +7,8 @@
 //!
 //! 오류가 있는 줄 때문에 정상 줄까지 버리지 않는다 (§28).
 
+pub mod capacity;
+pub use capacity::{export_capacity, status_text};
 pub mod adjustment;
 pub mod admin;
 pub mod dept_fees;
@@ -1045,3 +1047,7 @@ pub(crate) fn status_label(status: &str) -> String {
         "수강취소".into()
     }
 }
+
+#[cfg(test)]
+#[path = "capacity_tests.rs"]
+mod capacity_tests;

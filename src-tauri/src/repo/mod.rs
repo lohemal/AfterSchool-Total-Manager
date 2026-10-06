@@ -4,6 +4,7 @@
 //! (`Transaction`이 `Deref<Target = Connection>`이므로 그대로 넘길 수 있다).
 
 pub mod adjustment;
+pub mod capacity;
 pub mod change_log;
 pub mod department;
 pub mod eligibility;
@@ -81,3 +82,6 @@ mod adjustment_tests;
 
 #[cfg(test)]
 mod workspace_copy_tests;
+
+#[cfg(test)]
+mod capacity_tests;

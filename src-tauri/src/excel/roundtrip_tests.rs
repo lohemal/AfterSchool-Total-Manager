@@ -227,6 +227,8 @@ fn enroll_fixture() -> (Db, i64, i64) {
                     Fee { item_code: "INSTRUCTOR".into(), amount: 40_000 },
                     Fee { item_code: "TEXTBOOK".into(), amount: 30_000 },
                 ],
+                capacity: None,
+                allowed_grades: Vec::new(),
             },
         )
     })

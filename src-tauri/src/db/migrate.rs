@@ -64,6 +64,14 @@ const MIGRATIONS: &[Migration] = &[
         sql: include_str!("../../migrations/005_billing_adjustment.sql"),
         fk_off: false,
     },
+    // 정원·수강 가능 학년. 정원 칸 하나를 더하고 새 표를 만든다. 자료판
+    // 트리거는 **좁히기만** 하므로 기존 정산 상태가 그대로 남는다.
+    Migration {
+        version: 6,
+        name: "006_department_capacity",
+        sql: include_str!("../../migrations/006_department_capacity.sql"),
+        fk_off: false,
+    },
 ];
 
 pub fn latest_version() -> i32 {

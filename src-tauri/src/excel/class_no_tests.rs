@@ -183,6 +183,8 @@ fn 수강생_업로드가_한글_반_학생을_찾는다() {
                 days: None,
                 note: None,
                 fees: vec![Fee { item_code: "INSTRUCTOR".into(), amount: 40_000 }],
+                capacity: None,
+                allowed_grades: Vec::new(),
             },
         )
     })

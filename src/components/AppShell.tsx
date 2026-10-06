@@ -32,6 +32,7 @@ const NAV: { group: string | null; items: Item[] }[] = [
     group: '수강 관리',
     items: [
       { to: '/roster', label: '수강생 명단' },
+      { to: '/capacity', label: '부서별 수강현황' },
       { to: '/student-detail', label: '학생 상세정보' },
       { to: '/adjustments', label: '추가·취소 관리', badge: 'adjustment' },
       { to: '/changes', label: '변경 이력' },

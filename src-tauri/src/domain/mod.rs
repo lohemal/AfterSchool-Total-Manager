@@ -160,3 +160,66 @@ mod tests {
         assert!(!eligibility_active(Some("2026-05-01"), None, "2026-04-01", "2026-04-30"));
     }
 }
+
+/// 업무상 요일 차례. 가나다순이 아니다.
+pub const DAY_ORDER: [&str; 7] = ["월", "화", "수", "목", "금", "토", "일"];
+
+/// 요일을 읽을 수 없는 반을 모아 두는 이름.
+pub const DAY_UNKNOWN: &str = "미지정";
+
+/// 요일 칸의 글을 요일 목록으로 읽는다.
+///
+/// `department.days` 는 자유 입력이다(`월,수`). 쉼표뿐 아니라 가운뎃점·빗금·
+/// 빈칸으로 적는 사람도 있고 `월요일` 처럼 길게 적는 사람도 있어서, 한글이
+/// 아닌 글자를 모두 구분자로 보고 토막마다 **첫 글자**만 본다. 요일이 아닌
+/// 토막은 버린다. 차례는 월→일로 맞추고 중복은 지운다.
+///
+/// **같은 규칙이 두 곳에 있다** — 여기와 화면쪽 `src/lib/format.ts` 의
+/// `parseDays`. 하나만 고치면 화면과 Excel 의 차례가 달라진다.
+pub fn parse_days(text: &str) -> Vec<&'static str> {
+    let mut out: Vec<&'static str> = Vec::new();
+    for token in text.split(|c: char| !('가'..='힣').contains(&c)) {
+        let Some(first) = token.chars().next() else {
+            continue;
+        };
+        let s = first.to_string();
+        if let Some(day) = DAY_ORDER.iter().find(|d| **d == s) {
+            if !out.contains(day) {
+                out.push(day);
+            }
+        }
+    }
+    out.sort_by_key(|d| DAY_ORDER.iter().position(|x| x == d).unwrap_or(99));
+    out
+}
+
+/// 수강 가능 학년을 사람이 읽는 글로. **빈 목록은 '미설정'** 이다.
+///
+/// `support_policy` 쪽 `grade_text` 와 헷갈리지 말 것 — 그쪽은 빈 목록이
+/// '전 학년'이다. 뜻이 반대라서 함수를 따로 둔다.
+pub fn allowed_grade_text(grades: &[i64]) -> String {
+    if grades.is_empty() {
+        return "미설정".to_string();
+    }
+    if grades.len() == 6 && (1..=6).all(|g| grades.contains(&g)) {
+        return "전 학년".to_string();
+    }
+    let mut g = grades.to_vec();
+    g.sort_unstable();
+    g.dedup();
+    format!(
+        "{}학년",
+        g.iter()
+            .map(|x| x.to_string())
+            .collect::<Vec<_>>()
+            .join("·")
+    )
+}
+
+/// 수강 가능 학년 목록을 다듬는다. 1~6 밖은 버리고, 차례를 맞추고 중복을 지운다.
+pub fn clean_grades(grades: &[i64]) -> Vec<i64> {
+    let mut g: Vec<i64> = grades.iter().copied().filter(|x| (1..=6).contains(x)).collect();
+    g.sort_unstable();
+    g.dedup();
+    g
+}

@@ -117,6 +117,8 @@ impl F {
                         days: None,
                         note: None,
                         fees,
+                        capacity: None,
+                        allowed_grades: Vec::new(),
                     },
                 )
             })
@@ -664,6 +666,8 @@ fn 부서_기준금액_재반영_경로도_잡힌다() {
                 days: None,
                 note: None,
                 fees: vec![fee(강사료, 35_000), fee(수용비, 5_000), fee(교재비, 20_000), fee(재료비, 10_000)],
+                capacity: None,
+                allowed_grades: Vec::new(),
             },
         )
     })
@@ -905,6 +909,8 @@ fn 반이나_부서명이_바뀌어도_당시_표시가_남는다() {
                 days: None,
                 note: None,
                 fees: vec![fee(강사료, 10_000)],
+                capacity: None,
+                allowed_grades: Vec::new(),
             },
         )
     })

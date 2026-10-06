@@ -49,3 +49,40 @@ pub fn department_delete_all(
         backup,
     })
 }
+
+// ─────────────────────────────────────────────── 부서별 수강현황 (v0.1.7)
+
+/// 한 작업공간의 수강현황 한 벌 — 요약 · 반별 · 학년별 · 요일별.
+#[tauri::command]
+pub fn capacity_stats(
+    db: State<'_, Db>,
+    workspace_id: i64,
+) -> AppResult<crate::model::CapacityStats> {
+    db.read(|c| crate::repo::capacity::stats(c, workspace_id))
+}
+
+/// 수강 가능 부서 찾기. **읽기 전용이다** — 수강을 만들지도 고치지도 않는다.
+#[tauri::command]
+pub fn capacity_find_seats(
+    db: State<'_, Db>,
+    workspace_id: i64,
+    query: crate::model::SeatQuery,
+) -> AppResult<crate::model::SeatResult> {
+    db.read(|c| crate::repo::capacity::find_seats(c, workspace_id, &query))
+}
+
+/// 통계 Excel. **화면 필터와 무관하게 작업공간 전체**를 낸다 — 공식 통계에서
+/// 일부 반이 조용히 빠지면 결재 자료가 틀린다.
+#[tauri::command]
+pub fn capacity_export(
+    db: State<'_, Db>,
+    workspace_id: i64,
+) -> AppResult<crate::excel::ExportResult> {
+    let dir = db.export_dir();
+    db.read(|c| {
+        let ws = crate::repo::year::get_workspace(c, workspace_id)?;
+        let year = crate::repo::year::get_year(c, ws.year_id)?;
+        let scope = [year.name.as_str(), ws.name.as_str()];
+        crate::excel::export_capacity(c, workspace_id, &scope, &dir)
+    })
+}

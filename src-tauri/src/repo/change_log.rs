@@ -16,6 +16,13 @@ pub const ENROLL_CANCEL: &str = "ENROLL_CANCEL";
 pub const ENROLL_RESTORE: &str = "ENROLL_RESTORE";
 pub const CHARGE_EDIT: &str = "CHARGE_EDIT";
 pub const DEPT_APPLY: &str = "DEPT_APPLY";
+/// 부서 기준금액 수정 — **학생 금액에 반영한 일(`DEPT_APPLY`)과 다른 사건이다.**
+/// 이쪽은 부서의 기준값만 바뀐 것이고, 학생이 실제 내는 금액은 아직 그대로다.
+pub const DEPT_FEE_EDIT: &str = "DEPT_FEE_EDIT";
+/// 정원 수정 (v0.1.7)
+pub const DEPT_CAPACITY_EDIT: &str = "DEPT_CAPACITY_EDIT";
+/// 수강 가능 학년 수정 (v0.1.7)
+pub const DEPT_ALLOWED_GRADE_EDIT: &str = "DEPT_ALLOWED_GRADE_EDIT";
 /// 새 작업공간을 만들며 기존 작업공간의 운영자료를 가져온 일 (v0.1.6)
 pub const WS_IMPORT: &str = "WS_IMPORT";
 
@@ -27,6 +34,9 @@ pub fn kind_label(kind: &str) -> &'static str {
         ENROLL_RESTORE => "수강 복원",
         CHARGE_EDIT => "금액 변경",
         DEPT_APPLY => "부서금액 재반영",
+        DEPT_FEE_EDIT => "부서 기준금액 변경",
+        DEPT_CAPACITY_EDIT => "정원 변경",
+        DEPT_ALLOWED_GRADE_EDIT => "수강 가능 학년 변경",
         WS_IMPORT => "작업공간 자료 가져오기",
         "ELIGIBILITY" => "지원자격 변경",
         "GRANT" => "지원금 변경",
