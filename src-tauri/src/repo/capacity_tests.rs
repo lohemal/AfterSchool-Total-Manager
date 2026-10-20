@@ -74,6 +74,7 @@ impl F {
                         fees: vec![fee("INSTRUCTOR", 30_000)],
                         capacity: cap,
                         allowed_grades: grades.to_vec(),
+                        custom_sessions: 0,
                     },
                 )
             })
@@ -164,6 +165,7 @@ fn 정원은_1명_미만을_받지_않는다() {
                 fees: Vec::new(),
                 capacity: Some(0),
                 allowed_grades: Vec::new(),
+                custom_sessions: 0,
             },
         )
     });
@@ -182,6 +184,7 @@ fn 정원은_1명_미만을_받지_않는다() {
                 fees: Vec::new(),
                 capacity: Some(-3),
                 allowed_grades: Vec::new(),
+                custom_sessions: 0,
             },
         )
     });
@@ -376,6 +379,7 @@ fn 초등학교_밖의_학년은_받지_않는다() {
                 fees: Vec::new(),
                 capacity: Some(10),
                 allowed_grades: vec![1, 7],
+                custom_sessions: 0,
             },
         )
     });
@@ -641,6 +645,7 @@ fn 정원과_학년을_고쳐도_정산이_낡음이_되지_않는다() {
                 fees: vec![fee("INSTRUCTOR", 30_000)],
                 capacity: Some(25),
                 allowed_grades: vec![1, 2, 3],
+                custom_sessions: 0,
             },
         )
     })
@@ -686,6 +691,7 @@ fn 기준금액이나_요일을_고치면_예전처럼_낡음이_된다() {
                 fees: vec![fee("INSTRUCTOR", 30_000)],
                 capacity: Some(20),
                 allowed_grades: vec![1],
+                custom_sessions: 0,
             },
         )
     })
@@ -709,6 +715,7 @@ fn 값이_그대로인_저장은_자료판을_올리지_않는다() {
         fees: vec![fee("INSTRUCTOR", 30_000)],
         capacity: Some(20),
         allowed_grades: vec![1],
+        custom_sessions: 0,
     };
     let 자료판 = || -> i64 {
         f.db.read(|c| {
@@ -745,6 +752,7 @@ fn 기준금액_정원_학년_변경은_서로_다른_줄로_남는다() {
                 fees: vec![fee("INSTRUCTOR", 35_000)],
                 capacity: Some(25),
                 allowed_grades: vec![1, 2, 3],
+                custom_sessions: 0,
             },
         )
     })
@@ -794,6 +802,7 @@ fn 바뀌지_않은_것은_이력에_남기지_않는다() {
         fees: vec![fee("INSTRUCTOR", 30_000)],
         capacity: Some(20),
         allowed_grades: vec![1, 2],
+        custom_sessions: 0,
     };
     f.db.write(|c| repo::department::update(c, a, &same)).unwrap();
 
@@ -821,6 +830,7 @@ fn 미설정으로_되돌린_것도_이력에_남는다() {
                 fees: vec![fee("INSTRUCTOR", 30_000)],
                 capacity: None,
                 allowed_grades: Vec::new(),
+                custom_sessions: 0,
             },
         )
     })

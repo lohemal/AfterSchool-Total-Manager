@@ -150,6 +150,11 @@ pub fn run(
                 // `department::create` 가 옛 id 를 가리키지 않게 새로 쓴다.
                 capacity: d.capacity,
                 allowed_grades: d.allowed_grades.clone(),
+                // 맞춤형 **기본 차시**는 그 반을 어떻게 운영하는지에 대한
+                // 설명이라 함께 온다. 그러나 **휴강·보강·날짜별 차시 조정과
+                // 공통 휴업일은 오지 않는다** — 그것들은 지난 기간에 실제로
+                // 있었던 일이고, 새 기간의 달력은 아직 비어 있어야 한다.
+                custom_sessions: d.custom_sessions,
             },
         )?;
         dept_map.insert(d.id, new_id);

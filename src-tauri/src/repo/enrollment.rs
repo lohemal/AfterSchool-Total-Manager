@@ -591,6 +591,11 @@ pub fn create(
         ));
     }
 
+    // 이미 떠난 학생은 새로 넣지 않는다. 화면에서도 거르지만 막는 곳은 여기
+    // 하나다 — Excel 업로드처럼 화면을 거치지 않는 길이 있기 때문이다.
+    // 전출 **예정**은 그날까지 재학생이므로 막지 않는다 (설계안 29-6).
+    crate::repo::student::guard_enrollable(conn, input.student_id)?;
+
     let ctx = ctx_of(conn, workspace_id, input.student_id, input.department_id)?;
 
     conn.execute(
@@ -1048,11 +1053,29 @@ pub fn student_detail(
     student_id: i64,
     items: &[CostItem],
 ) -> AppResult<StudentDetail> {
-    let (grade, class_no, student_no, name, note): (i64, String, i64, String, String) = conn
+    #[allow(clippy::type_complexity)]
+    let (grade, class_no, student_no, name, note, transfer_out_date): (
+        i64,
+        String,
+        i64,
+        String,
+        String,
+        Option<String>,
+    ) = conn
         .query_row(
-            "SELECT grade, class_no, student_no, name, note FROM student WHERE id = ?1",
+            "SELECT grade, class_no, student_no, name, note, transfer_out_date
+               FROM student WHERE id = ?1",
             params![student_id],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+            |r| {
+                Ok((
+                    r.get(0)?,
+                    r.get(1)?,
+                    r.get(2)?,
+                    r.get(3)?,
+                    r.get(4)?,
+                    r.get(5)?,
+                ))
+            },
         )
         .optional()?
         .ok_or_else(|| AppError::not_found("학생을 찾지 못했습니다."))?;
@@ -1162,6 +1185,9 @@ pub fn student_detail(
             name,
             note,
             programs,
+            enrolment: crate::repo::student::enrolment_code(transfer_out_date.as_deref())
+                .to_string(),
+            transfer_out_date,
         },
         supports,
         workspaces,

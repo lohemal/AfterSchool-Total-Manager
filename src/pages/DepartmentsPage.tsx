@@ -128,6 +128,15 @@ export function DepartmentsPage() {
         d.capacity === null ? <span className="muted">미설정</span> : `${d.capacity}명`,
     },
     {
+      key: 'customSessions',
+      head: '맞춤형',
+      align: 'num',
+      width: 80,
+      sort: cmp.num((d) => d.customSessions),
+      render: (d) =>
+        d.customSessions > 0 ? `${d.customSessions}차시` : <span className="muted">—</span>,
+    },
+    {
       key: 'allowedGrades',
       head: '대상 학년',
       width: 110,
@@ -405,6 +414,7 @@ function DepartmentModal({
     })),
     capacity: value?.capacity ?? null,
     allowedGrades: value?.allowedGrades ?? [],
+    customSessions: value?.customSessions ?? 0,
   })
 
   const total = form.fees.reduce((s, f) => s + f.amount, 0)
@@ -503,6 +513,27 @@ function DepartmentModal({
       </div>
       <div className="hint" style={{ marginBottom: 10 }}>
         비워 두면 <b>정원 미설정</b>입니다. 남은 자리와 충원율을 세지 않습니다.
+      </div>
+
+      <div className="formRow">
+        <label className="field__label">맞춤형 프로그램 차시</label>
+        <div className="inlineRow">
+          <Input
+            type="number"
+            min={0}
+            style={{ width: 96 }}
+            value={form.customSessions}
+            onChange={(e) =>
+              setForm({ ...form, customSessions: Math.max(0, Number(e.target.value) || 0) })
+            }
+          />
+          <span className="muted">차시 (1회 수업당)</span>
+        </div>
+      </div>
+      <div className="hint" style={{ marginBottom: 10 }}>
+        <b>0차시 = 맞춤형 프로그램 아님</b>입니다. 1 이상으로 두면 [맞춤형 강사료] 화면에서 실제
+        수업일과 강사료를 셉니다. 날짜마다 차시를 따로 고치거나 휴강·보강을 넣는 일은 그 화면에서
+        합니다.
       </div>
 
       <div className="formRow">

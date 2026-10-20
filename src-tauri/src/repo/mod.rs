@@ -6,6 +6,7 @@
 pub mod adjustment;
 pub mod capacity;
 pub mod change_log;
+pub mod custom_fee;
 pub mod department;
 pub mod eligibility;
 pub mod fee_report;
@@ -85,3 +86,9 @@ mod workspace_copy_tests;
 
 #[cfg(test)]
 mod capacity_tests;
+
+#[cfg(test)]
+mod transfer_tests;
+
+#[cfg(test)]
+mod custom_fee_tests;

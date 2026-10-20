@@ -52,6 +52,7 @@ const NAV: { group: string | null; items: Item[] }[] = [
     items: [
       { to: '/proposal', label: '품의 양식 받기' },
       { to: '/fee-report', label: '학생별 징수 내역' },
+      { to: '/custom-fee', label: '맞춤형 강사료' },
     ],
   },
   {

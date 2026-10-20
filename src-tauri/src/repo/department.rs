@@ -39,7 +39,7 @@ pub fn list(conn: &Connection, workspace_id: i64, query: Option<&str>) -> AppRes
         .map(|q| format!("%{q}%"));
 
     let mut st = conn.prepare(
-        "SELECT d.id, d.name, d.class_name, d.teacher, d.days, d.note, d.capacity,
+        "SELECT d.id, d.name, d.class_name, d.teacher, d.days, d.note, d.capacity, d.custom_sessions,
                 (SELECT COUNT(*) FROM enrollment e
                   WHERE e.department_id = d.id AND e.status = 'ACTIVE')
            FROM department d
@@ -57,10 +57,11 @@ pub fn list(conn: &Connection, workspace_id: i64, query: Option<&str>) -> AppRes
                 days: r.get(4)?,
                 note: r.get(5)?,
                 capacity: r.get(6)?,
+                custom_sessions: r.get(7)?,
                 allowed_grades: Vec::new(),
                 fees: Vec::new(),
                 total: 0,
-                enrollment_count: r.get(7)?,
+                enrollment_count: r.get(8)?,
             })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -201,8 +202,9 @@ pub fn create(conn: &Connection, workspace_id: i64, input: &DepartmentInput) -> 
     let name = required_text("부서명", &input.name)?;
     check_capacity(input.capacity)?;
     conn.execute(
-        "INSERT INTO department (workspace_id, name, class_name, teacher, days, note, capacity)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        "INSERT INTO department
+            (workspace_id, name, class_name, teacher, days, note, capacity, custom_sessions)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
         params![
             workspace_id,
             name,
@@ -210,7 +212,8 @@ pub fn create(conn: &Connection, workspace_id: i64, input: &DepartmentInput) -> 
             input.teacher.clone().unwrap_or_default().trim(),
             input.days.clone().unwrap_or_default().trim(),
             input.note.clone().unwrap_or_default(),
-            input.capacity
+            input.capacity,
+            input.custom_sessions
         ],
     )?;
     let id = conn.last_insert_rowid();
@@ -235,6 +238,14 @@ pub fn update(conn: &Connection, id: i64, input: &DepartmentInput) -> AppResult<
 
     let before_fees = fees_of(conn, id)?;
     let before_grades = grades_of(conn, id)?;
+    let before_custom: i64 = conn
+        .query_row(
+            "SELECT custom_sessions FROM department WHERE id = ?1",
+            params![id],
+            |r| r.get(0),
+        )
+        .optional()?
+        .unwrap_or(0);
     let before_capacity: Option<i64> = conn
         .query_row(
             "SELECT capacity FROM department WHERE id = ?1",
@@ -246,7 +257,8 @@ pub fn update(conn: &Connection, id: i64, input: &DepartmentInput) -> AppResult<
 
     let n = conn.execute(
         "UPDATE department
-            SET name = ?2, class_name = ?3, teacher = ?4, days = ?5, note = ?6, capacity = ?7
+            SET name = ?2, class_name = ?3, teacher = ?4, days = ?5, note = ?6,
+                capacity = ?7, custom_sessions = ?8
           WHERE id = ?1",
         params![
             id,
@@ -255,7 +267,8 @@ pub fn update(conn: &Connection, id: i64, input: &DepartmentInput) -> AppResult<
             input.teacher.clone().unwrap_or_default().trim(),
             input.days.clone().unwrap_or_default().trim(),
             input.note.clone().unwrap_or_default(),
-            input.capacity
+            input.capacity,
+            input.custom_sessions
         ],
     )?;
     if n == 0 {
@@ -269,6 +282,7 @@ pub fn update(conn: &Connection, id: i64, input: &DepartmentInput) -> AppResult<
         id,
         &before_fees,
         before_capacity,
+        before_custom,
         &before_grades,
         input,
     )
@@ -280,6 +294,7 @@ fn log_edits(
     id: i64,
     before_fees: &[Fee],
     before_capacity: Option<i64>,
+    before_custom: i64,
     before_grades: &[i64],
     input: &DepartmentInput,
 ) -> AppResult<()> {
@@ -335,6 +350,21 @@ fn log_edits(
         )?;
     }
 
+    if before_custom != input.custom_sessions {
+        log::write(
+            conn,
+            year_id,
+            Some(workspace_id),
+            log::DEPT_CUSTOM_EDIT,
+            None,
+            Some(id),
+            &target,
+            &custom_text(before_custom),
+            &custom_text(input.custom_sessions),
+            "",
+        )?;
+    }
+
     let after_grades = crate::domain::clean_grades(&input.allowed_grades);
     if before_grades != after_grades.as_slice() {
         log::write(
@@ -351,6 +381,15 @@ fn log_edits(
         )?;
     }
     Ok(())
+}
+
+/// 맞춤형 차시를 사람이 읽는 말로. **0 은 맞춤형이 아님**이지 0차시가 아니다.
+fn custom_text(n: i64) -> String {
+    if n <= 0 {
+        "맞춤형 아님".to_string()
+    } else {
+        format!("1회 {n}차시")
+    }
 }
 
 fn capacity_text(capacity: Option<i64>) -> String {

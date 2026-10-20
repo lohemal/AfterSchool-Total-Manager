@@ -119,6 +119,7 @@ impl F {
                         fees,
                         capacity: None,
                         allowed_grades: Vec::new(),
+                        custom_sessions: 0,
                     },
                 )
             })
@@ -668,6 +669,7 @@ fn 부서_기준금액_재반영_경로도_잡힌다() {
                 fees: vec![fee(강사료, 35_000), fee(수용비, 5_000), fee(교재비, 20_000), fee(재료비, 10_000)],
                 capacity: None,
                 allowed_grades: Vec::new(),
+                custom_sessions: 0,
             },
         )
     })
@@ -911,6 +913,7 @@ fn 반이나_부서명이_바뀌어도_당시_표시가_남는다() {
                 fees: vec![fee(강사료, 10_000)],
                 capacity: None,
                 allowed_grades: Vec::new(),
+                custom_sessions: 0,
             },
         )
     })
@@ -1006,11 +1009,23 @@ fn 기록이_있으면_학생과_부서를_지우지_못한다() {
         assert!(msg.contains("추가징수·환불 기록"), "{이름}: {msg}");
     }
 
-    // 기록을 지우면 그때는 지워진다
+    // 기록을 지우면 부서는 그때 지워진다
     let id = f.전체().additional.details[0].id;
     f.db.write(|c| repo::adjustment::delete_many(c, &[id])).unwrap();
     assert_eq!(f.전체().additional.count, 0);
-    f.db.write(|c| repo::student::delete_many(c, &[a])).unwrap();
+
+    // 학생은 아직 지워지지 않는다 — 수강 기록이 남아 있기 때문이다 (v0.1.8).
+    // `enrollment` 는 ON DELETE CASCADE 라 학생을 지우면 수강과 금액이 말없이
+    // 함께 사라지는데, 정산 스냅샷은 외래키가 없어 그대로 남는다. 되돌릴 수
+    // 없는 손상이므로 아예 막는다. 실제 전출은 [전출 처리]로 한다.
+    let err = f
+        .db
+        .write(|c| repo::student::delete_many(c, &[a]))
+        .unwrap_err();
+    assert!(
+        format!("{err:?}").contains("수강 기록"),
+        "수강이 딸린 학생이 지워졌다: {err:?}"
+    );
 }
 
 // ─────────────────────────────────── Excel

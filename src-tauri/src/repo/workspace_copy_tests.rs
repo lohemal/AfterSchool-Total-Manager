@@ -108,6 +108,7 @@ impl F {
                         fees,
                         capacity: None,
                         allowed_grades: Vec::new(),
+                        custom_sessions: 0,
                     },
                 )
             })
@@ -358,6 +359,7 @@ fn 새_부서는_새_행이고_옛_부서와_독립이다() {
                 fees: vec![fee(강사료, 200_000)],
                 capacity: None,
                 allowed_grades: Vec::new(),
+                custom_sessions: 0,
             },
         )
     })
@@ -1111,6 +1113,7 @@ fn 학생별_수정금액_셋은_어느_것도_새_작업공간으로_넘어가�
                 ],
                 capacity: None,
                 allowed_grades: Vec::new(),
+                custom_sessions: 0,
             },
         )
     })
@@ -1198,6 +1201,7 @@ fn 정원과_수강_가능_학년도_가져온다() {
                     fees: 기준금액(),
                     capacity: Some(20),
                     allowed_grades: vec![1, 2, 4],
+                    custom_sessions: 0,
                 },
             )
         })
@@ -1291,6 +1295,7 @@ fn 기준_부서를_지워도_새_작업공간의_학년은_남는다() {
                     fees: 기준금액(),
                     capacity: Some(20),
                     allowed_grades: vec![3, 5],
+                    custom_sessions: 0,
                 },
             )
         })
@@ -1313,4 +1318,83 @@ fn 기준_부서를_지워도_새_작업공간의_학년은_남는다() {
         새,
     );
     assert_eq!(위반, 0);
+}
+
+/// 맞춤형 **기본 차시**는 오고, **그 기간에 실제로 있었던 일**은 오지 않는다 (v0.1.8).
+///
+/// 휴강·보강·날짜별 차시와 공통 휴업일은 지난 달력의 기록이다. 새 기간의
+/// 달력은 비어 있어야 담당자가 이번 기간을 처음부터 짠다.
+#[test]
+fn 맞춤형_기본_차시만_가져오고_수업일_기록은_가져오지_않는다() {
+    let f = F::new();
+    let 기준 = f.ws("1기", "2026-10-01", "2026-10-31");
+    let 로봇 = f
+        .db
+        .write(|c| {
+            repo::department::create(
+                c,
+                기준,
+                &DepartmentInput {
+                    name: "로봇과학".into(),
+                    class_name: Some("A반".into()),
+                    teacher: Some("김강사".into()),
+                    days: Some("화".into()),
+                    note: None,
+                    fees: 기준금액(),
+                    capacity: Some(20),
+                    allowed_grades: vec![1, 2, 4],
+                    custom_sessions: 2,
+                },
+            )
+        })
+        .unwrap();
+
+    // 지난 기간의 달력을 채워 둔다
+    f.db.write(|c| repo::custom_fee::session_set(c, 로봇, "2026-10-20", 0, "공휴일"))
+        .unwrap();
+    f.db.write(|c| repo::custom_fee::session_set(c, 로봇, "2026-10-16", 2, "보강"))
+        .unwrap();
+    f.db.write(|c| repo::custom_fee::session_set(c, 로봇, "2026-10-27", 1, "단축"))
+        .unwrap();
+    f.db.write(|c| repo::custom_fee::closure_add(c, 기준, "2026-10-13", "재량휴업일"))
+        .unwrap();
+
+    let (새, _) = f
+        .ws_copy("2기", "2026-11-01", "2026-11-30", Some(가져오기(기준, true, false)))
+        .unwrap();
+
+    let 새부서 = f
+        .db
+        .read(|c| repo::department::list(c, 새, None))
+        .unwrap();
+    assert_eq!(새부서.len(), 1);
+    assert_eq!(새부서[0].custom_sessions, 2, "기본 차시가 오지 않았다");
+    // v0.1.7 규칙도 그대로
+    assert_eq!(새부서[0].capacity, Some(20));
+    assert_eq!(새부서[0].allowed_grades, vec![1, 2, 4]);
+
+    // 달력은 비어 있다
+    let 새조정 = f.한개(
+        "SELECT COUNT(*) FROM dept_session s JOIN department d ON d.id = s.department_id
+          WHERE d.workspace_id = ?1",
+        새,
+    );
+    assert_eq!(새조정, 0, "휴강·보강·차시 조정이 함께 왔다");
+    let 새휴업 = f.한개(
+        "SELECT COUNT(*) FROM workspace_closure WHERE workspace_id = ?1",
+        새,
+    );
+    assert_eq!(새휴업, 0, "공통 휴업일이 함께 왔다");
+
+    // 기준 작업공간은 그대로다
+    let 옛조정 = f.한개(
+        "SELECT COUNT(*) FROM dept_session s JOIN department d ON d.id = s.department_id
+          WHERE d.workspace_id = ?1",
+        기준,
+    );
+    assert_eq!(옛조정, 3);
+    assert_eq!(
+        f.한개("SELECT COUNT(*) FROM workspace_closure WHERE workspace_id = ?1", 기준),
+        1
+    );
 }

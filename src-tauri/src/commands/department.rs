@@ -86,3 +86,68 @@ pub fn capacity_export(
         crate::excel::export_capacity(c, workspace_id, &scope, &dir)
     })
 }
+
+// ─────────────────────────────────────────────── 맞춤형 강사료 (v0.1.8)
+
+#[tauri::command]
+pub fn custom_fee_report(
+    db: State<'_, Db>,
+    workspace_id: i64,
+    include_all: bool,
+) -> AppResult<crate::model::CustomFeeReport> {
+    db.read(|c| crate::repo::custom_fee::report(c, workspace_id, include_all))
+}
+
+#[tauri::command]
+pub fn custom_closure_add(
+    db: State<'_, Db>,
+    workspace_id: i64,
+    date: String,
+    reason: String,
+) -> AppResult<()> {
+    db.write(|c| crate::repo::custom_fee::closure_add(c, workspace_id, &date, &reason))
+}
+
+#[tauri::command]
+pub fn custom_closure_delete(db: State<'_, Db>, id: i64) -> AppResult<()> {
+    db.write(|c| crate::repo::custom_fee::closure_delete(c, id))
+}
+
+/// 한 날짜의 차시를 정한다. 0이면 휴강, 예정 요일이 아니면 보강이 된다.
+#[tauri::command]
+pub fn custom_session_set(
+    db: State<'_, Db>,
+    department_id: i64,
+    date: String,
+    sessions: i64,
+    reason: String,
+) -> AppResult<()> {
+    db.write(|c| {
+        crate::repo::custom_fee::session_set(c, department_id, &date, sessions, &reason)
+    })
+}
+
+/// 조정을 지워 기본 규칙으로 되돌린다.
+#[tauri::command]
+pub fn custom_session_clear(
+    db: State<'_, Db>,
+    department_id: i64,
+    date: String,
+) -> AppResult<()> {
+    db.write(|c| crate::repo::custom_fee::session_clear(c, department_id, &date))
+}
+
+#[tauri::command]
+pub fn custom_rate_set(db: State<'_, Db>, year_id: i64, rate: i64) -> AppResult<()> {
+    db.write(|c| crate::repo::custom_fee::rate_set(c, year_id, rate))
+}
+
+/// 맞춤형 강사료 Excel. **화면 필터와 무관하게 작업공간 전체**를 낸다.
+#[tauri::command]
+pub fn custom_fee_export(
+    db: State<'_, Db>,
+    workspace_id: i64,
+) -> AppResult<crate::excel::ExportResult> {
+    let dir = db.export_dir();
+    db.read(|c| crate::excel::export_custom_fee(c, workspace_id, &dir))
+}

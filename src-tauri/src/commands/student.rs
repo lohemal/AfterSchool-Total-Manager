@@ -44,3 +44,25 @@ pub fn student_delete_all(
         backup,
     })
 }
+
+// ─────────────────────────────────────────────── 전출 (v0.1.8)
+
+/// 전출 처리 전 확인 — 무엇이 걸려 있는지만 알려 준다. 아무것도 고치지 않는다.
+#[tauri::command]
+pub fn student_transfer_check(
+    db: State<'_, Db>,
+    id: i64,
+    date: Option<String>,
+) -> AppResult<crate::model::TransferCheck> {
+    db.read(|c| crate::repo::student::transfer_check(c, id, date.as_deref()))
+}
+
+/// 전출일을 지정·수정한다. `date` 가 없으면 전출 정보를 지워 재학으로 되돌린다.
+#[tauri::command]
+pub fn student_transfer_set(
+    db: State<'_, Db>,
+    id: i64,
+    date: Option<String>,
+) -> AppResult<()> {
+    db.write(|c| crate::repo::student::transfer_set(c, id, date.as_deref()))
+}

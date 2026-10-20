@@ -23,6 +23,22 @@ pub const DEPT_FEE_EDIT: &str = "DEPT_FEE_EDIT";
 pub const DEPT_CAPACITY_EDIT: &str = "DEPT_CAPACITY_EDIT";
 /// 수강 가능 학년 수정 (v0.1.7)
 pub const DEPT_ALLOWED_GRADE_EDIT: &str = "DEPT_ALLOWED_GRADE_EDIT";
+/// 전출일을 처음 지정 (v0.1.8)
+pub const STUDENT_TRANSFER_SET: &str = "STUDENT_TRANSFER_SET";
+/// 전출일을 고침 (v0.1.8)
+pub const STUDENT_TRANSFER_EDIT: &str = "STUDENT_TRANSFER_EDIT";
+/// 전출 정보를 지워 재학으로 되돌림 (v0.1.8)
+pub const STUDENT_TRANSFER_CLEAR: &str = "STUDENT_TRANSFER_CLEAR";
+/// 맞춤형 기본 차시 변경 (v0.1.8)
+pub const DEPT_CUSTOM_EDIT: &str = "DEPT_CUSTOM_EDIT";
+/// 작업공간 공통 휴업일 등록·삭제 (v0.1.8)
+pub const WS_CLOSURE_ADD: &str = "WS_CLOSURE_ADD";
+pub const WS_CLOSURE_DELETE: &str = "WS_CLOSURE_DELETE";
+/// 부서 수업일 예외 지정·해제 (v0.1.8)
+pub const DEPT_SESSION_EDIT: &str = "DEPT_SESSION_EDIT";
+pub const DEPT_SESSION_CLEAR: &str = "DEPT_SESSION_CLEAR";
+/// 맞춤형 차시당 단가 변경 (v0.1.8)
+pub const YEAR_RATE_EDIT: &str = "YEAR_RATE_EDIT";
 /// 새 작업공간을 만들며 기존 작업공간의 운영자료를 가져온 일 (v0.1.6)
 pub const WS_IMPORT: &str = "WS_IMPORT";
 
@@ -38,6 +54,15 @@ pub fn kind_label(kind: &str) -> &'static str {
         DEPT_CAPACITY_EDIT => "정원 변경",
         DEPT_ALLOWED_GRADE_EDIT => "수강 가능 학년 변경",
         WS_IMPORT => "작업공간 자료 가져오기",
+        STUDENT_TRANSFER_SET => "전출 예정 등록",
+        STUDENT_TRANSFER_EDIT => "전출일 변경",
+        STUDENT_TRANSFER_CLEAR => "전출 정보 해제",
+        DEPT_CUSTOM_EDIT => "맞춤형 기본 차시 변경",
+        WS_CLOSURE_ADD => "휴업일 등록",
+        WS_CLOSURE_DELETE => "휴업일 삭제",
+        DEPT_SESSION_EDIT => "수업일 조정",
+        DEPT_SESSION_CLEAR => "수업일 조정 해제",
+        YEAR_RATE_EDIT => "맞춤형 차시당 단가 변경",
         "ELIGIBILITY" => "지원자격 변경",
         "GRANT" => "지원금 변경",
         "POLICY" => "지원정책 변경",

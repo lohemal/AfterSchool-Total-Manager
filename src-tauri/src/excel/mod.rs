@@ -8,6 +8,8 @@
 //! 오류가 있는 줄 때문에 정상 줄까지 버리지 않는다 (§28).
 
 pub mod capacity;
+pub mod custom_fee;
+pub use custom_fee::export_custom_fee;
 pub use capacity::{export_capacity, status_text};
 pub mod adjustment;
 pub mod admin;
@@ -1051,3 +1053,7 @@ pub(crate) fn status_label(status: &str) -> String {
 #[cfg(test)]
 #[path = "capacity_tests.rs"]
 mod capacity_tests;
+
+#[cfg(test)]
+#[path = "custom_fee_tests.rs"]
+mod custom_fee_tests;

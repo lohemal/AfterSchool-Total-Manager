@@ -32,6 +32,9 @@ export interface WorkspaceInput {
   note?: string
 }
 
+/** `ATTENDING` 재학 · `LEAVING` 전출 예정 · `LEFT` 전출 */
+export type Enrolment = 'ATTENDING' | 'LEAVING' | 'LEFT'
+
 export interface Student {
   id: number
   grade: number
@@ -40,6 +43,20 @@ export interface Student {
   name: string
   note: string
   programs: ProgramCode[]
+  /** 전출일. null 이면 재학. 상태는 이 날짜와 오늘로 **판정한다** */
+  transferOutDate: string | null
+  /** 오늘 기준으로 낸 재학상태 — 저장된 값이 아니다 */
+  enrolment: Enrolment
+}
+
+export interface TransferCheck {
+  studentId: number
+  studentLabel: string
+  activeCount: number
+  activeDepartments: string[]
+  pastEnrollments: number
+  /** 전출일이 이미 지났는데 수강이 남아 막히는 상태 */
+  blocked: boolean
 }
 
 export interface StudentInput {
@@ -114,6 +131,8 @@ export interface Department {
   capacity: number | null
   /** 수강 가능 학년. **빈 배열이면 미설정** — 전 학년도 전 학년 불가도 아니다 */
   allowedGrades: number[]
+  /** 맞춤형 1회당 기본 차시. 0 이면 맞춤형이 아니다 */
+  customSessions: number
   enrollmentCount: number
 }
 
@@ -126,6 +145,8 @@ export interface DepartmentInput {
   fees: Fee[]
   capacity: number | null
   allowedGrades: number[]
+  /** 맞춤형 1회당 기본 차시. 0 이면 맞춤형이 아니다 */
+  customSessions: number
 }
 
 export interface Period {
@@ -878,4 +899,76 @@ export interface SeatResult {
   byDay: SeatDayGroup[]
   /** 고른 학생이 이미 듣고 있어 뺀 반 */
   excluded: string[]
+}
+
+// ─────────────────────────────────────────────── 맞춤형 강사료 (v0.1.8)
+
+export type SessionKind = 'NORMAL' | 'CLOSED' | 'EXTRA'
+
+export interface SessionDay {
+  date: string
+  weekday: string
+  kind: SessionKind
+  sessions: number
+  reason: string
+  /** 사람이 손대어 기본값과 달라진 날 */
+  overridden: boolean
+  /** 공통 휴업일 때문에 쉬는 날 */
+  fromClosure: boolean
+}
+
+export interface CustomFeeRow {
+  departmentId: number
+  name: string
+  className: string
+  teacher: string
+  days: string
+  baseSessions: number
+  plannedDays: number
+  closedDays: number
+  extraDays: number
+  countedDays: number
+  totalSessions: number
+  rate: number
+  fee: number
+  sessionsList: SessionDay[]
+}
+
+export interface Closure {
+  id: number
+  date: string
+  weekday: string
+  reason: string
+}
+
+export interface OrphanSession {
+  departmentId: number
+  departmentLabel: string
+  date: string
+  sessions: number
+  reason: string
+  why: string
+}
+
+export interface CustomFeeSummary {
+  classes: number
+  plannedDays: number
+  closedDays: number
+  extraDays: number
+  countedDays: number
+  totalSessions: number
+  totalFee: number
+}
+
+export interface CustomFeeReport {
+  yearName: string
+  workspaceName: string
+  startDate: string
+  endDate: string
+  rate: number
+  summary: CustomFeeSummary
+  rows: CustomFeeRow[]
+  closures: Closure[]
+  /** 기간 밖이거나 효력 없는 기록 — 지우지 않고 알린다 */
+  orphans: OrphanSession[]
 }

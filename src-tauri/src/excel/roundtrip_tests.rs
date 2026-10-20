@@ -229,6 +229,7 @@ fn enroll_fixture() -> (Db, i64, i64) {
                 ],
                 capacity: None,
                 allowed_grades: Vec::new(),
+                custom_sessions: 0,
             },
         )
     })

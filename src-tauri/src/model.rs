@@ -50,6 +50,10 @@ pub struct Student {
     pub note: String,
     /// 이 학생에게 유효한 지원제도 코드 목록 (`VOUCHER`, `FREE_VOUCHER`)
     pub programs: Vec<String>,
+    /// 전출일. `None` 이면 재학. 상태는 이 날짜와 오늘로 **판정한다**.
+    pub transfer_out_date: Option<String>,
+    /// `재학` · `전출 예정` · `전출` — 오늘 기준으로 낸 값이라 저장하지 않는다.
+    pub enrolment: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -75,6 +79,10 @@ pub struct StudentFilter {
     pub program: Option<String>,
     /// 이름·비고 통합 검색어
     pub query: Option<String>,
+    /// 재학상태 필터: `ATTENDING` | `LEAVING` | `LEFT`. 없으면 모두.
+    ///
+    /// 전출 학생도 기록 보존을 위해 **기본값은 모두 보이는 것**이다.
+    pub enrolment: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -136,6 +144,8 @@ pub struct Department {
     pub capacity: Option<i64>,
     /// 수강 가능 학년. **빈 목록이면 미설정** — 전 학년도 전 학년 불가도 아니다.
     pub allowed_grades: Vec<i64>,
+    /// 맞춤형 프로그램 1회당 기본 차시. **0 이면 맞춤형이 아니다.**
+    pub custom_sessions: i64,
     /// 이 부서를 수강 중인 학생 수 (ACTIVE)
     pub enrollment_count: i64,
 }
@@ -155,6 +165,9 @@ pub struct DepartmentInput {
     /// 수강 가능 학년. 빈 목록이면 미설정.
     #[serde(default)]
     pub allowed_grades: Vec<i64>,
+    /// 맞춤형 1회당 기본 차시. 0 이면 맞춤형이 아니다.
+    #[serde(default)]
+    pub custom_sessions: i64,
 }
 
 /// 지원정책 (연간한도 · 이월 · 대상학년 + 지원기간 목록)
@@ -1128,4 +1141,125 @@ pub struct SeatResult {
 pub struct SeatDayGroup {
     pub day: String,
     pub rows: Vec<SeatRow>,
+}
+
+// ─────────────────────────────────────────────── 학생 전출 (v0.1.8)
+
+/// 전출 처리 전에 보여 줄 확인 내용.
+///
+/// **자동으로 아무것도 고치지 않는다.** 수강 취소는 담당자가 기존 화면에서
+/// 해야 할 일이라, 여기서는 무엇이 걸려 있는지만 알려 준다.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TransferCheck {
+    pub student_id: i64,
+    pub student_label: String,
+    /// 지금 수강 중인 건수 (ACTIVE)
+    pub active_count: i64,
+    /// 수강 중인 반 이름표 — 어디를 정리해야 하는지 바로 알 수 있게
+    pub active_departments: Vec<String>,
+    /// 지난 기록 (취소분 포함) — 전출해도 지우지 않는다는 것을 보여 준다
+    pub past_enrollments: i64,
+    /// 전출일이 오늘이거나 지났는데 수강이 남아 있는가
+    pub blocked: bool,
+}
+
+// ─────────────────────────────────────────────── 맞춤형 강사료 (v0.1.8)
+
+/// 수업일 한 칸의 판정. **저장하지 않고 계산한다.**
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum SessionKind {
+    /// 예정 요일이고 수업한다
+    Normal,
+    /// 예정 요일인데 쉰다 (0차시)
+    Closed,
+    /// 예정 요일이 아닌데 수업한다 (보강·추가)
+    Extra,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionDay {
+    pub date: String,
+    pub weekday: String,
+    pub kind: SessionKind,
+    pub sessions: i64,
+    pub reason: String,
+    /// 사람이 손대어 기본값과 달라진 날인가 (기본 차시로 되돌리기 가능)
+    pub overridden: bool,
+    /// 작업공간 공통 휴업일 때문에 쉬는 날인가
+    pub from_closure: bool,
+}
+
+/// 부서 한 줄의 맞춤형 강사료.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CustomFeeRow {
+    pub department_id: i64,
+    pub name: String,
+    pub class_name: String,
+    pub teacher: String,
+    pub days: String,
+    /// 1회당 기본 차시. 0이면 맞춤형이 아니다.
+    pub base_sessions: i64,
+    pub planned_days: i64,
+    pub closed_days: i64,
+    pub extra_days: i64,
+    /// 실제로 수업하는 날 수 (차시가 1 이상인 날)
+    pub counted_days: i64,
+    pub total_sessions: i64,
+    pub rate: i64,
+    /// `총 인정 차시 × 차시당 단가`
+    pub fee: i64,
+    pub sessions_list: Vec<SessionDay>,
+}
+
+/// 기본 예정일과 이어지지 않는 예외 기록. **지우지 않고 알려 준다.**
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OrphanSession {
+    pub department_id: i64,
+    pub department_label: String,
+    pub date: String,
+    pub sessions: i64,
+    pub reason: String,
+    /// 왜 검토가 필요한지 사람이 읽을 말
+    pub why: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CustomFeeSummary {
+    pub classes: i64,
+    pub planned_days: i64,
+    pub closed_days: i64,
+    pub extra_days: i64,
+    pub counted_days: i64,
+    pub total_sessions: i64,
+    pub total_fee: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CustomFeeReport {
+    pub year_name: String,
+    pub workspace_name: String,
+    pub start_date: String,
+    pub end_date: String,
+    pub rate: i64,
+    pub summary: CustomFeeSummary,
+    pub rows: Vec<CustomFeeRow>,
+    pub closures: Vec<Closure>,
+    /// 기간 밖이거나 효력이 없는 예외 — 조용히 지우지 않고 보여 준다
+    pub orphans: Vec<OrphanSession>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Closure {
+    pub id: i64,
+    pub date: String,
+    pub weekday: String,
+    pub reason: String,
 }

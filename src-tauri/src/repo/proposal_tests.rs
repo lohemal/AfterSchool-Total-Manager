@@ -113,6 +113,7 @@ impl P {
                         fees,
                         capacity: None,
                         allowed_grades: Vec::new(),
+                        custom_sessions: 0,
                     },
                 )
             })

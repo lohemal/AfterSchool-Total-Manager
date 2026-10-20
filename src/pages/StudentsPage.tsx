@@ -11,12 +11,14 @@ import { useMemo, useState } from 'react'
 import { cmp, DataTable, type Column } from '@/components/DataTable'
 import { ExcelTools } from '@/components/ExcelTools'
 import { Confirm, Modal } from '@/components/Modal'
+import { TransferModal } from '@/components/TransferModal'
 import { useToast } from '@/components/Toast'
 import { Button, Card, Field, Input, Notice, NumInput, Search, Select } from '@/components/ui'
 import { api, errorMessage } from '@/ipc/api'
 import type { Student, StudentFilter, StudentInput } from '@/ipc/types'
 import { compareClassNo, supportLabel } from '@/lib/format'
 import type { SortSpec } from '@/lib/sortSpec'
+import { ENROLMENT_ORDER, ENROLMENT_TEXT, ENROLMENT_TONE } from '@/lib/transfer'
 import { useApp } from '@/lib/useApp'
 
 const EMPTY_FILTER: StudentFilter = {}
@@ -30,7 +32,10 @@ export function StudentsPage() {
   const [classNo, setClassNo] = useState('')
   const [program, setProgram] = useState('')
   const [query, setQuery] = useState('')
+  // 전출 학생도 기록 보존을 위해 **기본은 모두 보인다** (v0.1.8).
+  const [enrolment, setEnrolment] = useState('')
   const [selected, setSelected] = useState<number[]>([])
+  const [transferring, setTransferring] = useState<Student | null>(null)
   // 다중 정렬 (v0.1.6). 이 화면은 목록 전체를 들고 있으므로 화면에서 정렬한다.
   const [sort, setSort] = useState<SortSpec[]>([])
   const [editing, setEditing] = useState<Student | 'new' | null>(null)
@@ -43,8 +48,9 @@ export function StudentsPage() {
       classNo: classNo || null,
       program: program || null,
       query: query.trim() || null,
+      enrolment: enrolment || null,
     }),
-    [app.workspaceId, grade, classNo, program, query],
+    [app.workspaceId, grade, classNo, program, query, enrolment],
   )
 
   const list = useQuery({
@@ -104,6 +110,21 @@ export function StudentsPage() {
         return <span className={`tag tag--${v.tone}`}>{v.text}</span>
       },
     },
+    {
+      key: 'enrolment',
+      head: '재학상태',
+      width: 128,
+      // 재학 → 전출 예정 → 전출. 손볼 것이 위로 오게 둔다.
+      sort: cmp.num((s) => ENROLMENT_ORDER[s.enrolment]),
+      render: (s) => (
+        <span className={`tag tag--${ENROLMENT_TONE[s.enrolment]}`}>
+          {ENROLMENT_TEXT[s.enrolment]}
+          {s.transferOutDate && s.enrolment !== 'ATTENDING' && (
+            <> {s.transferOutDate.slice(5).replace('-', '/')}</>
+          )}
+        </span>
+      ),
+    },
     { key: 'note', head: '비고', align: 'left', render: (s) => s.note || <span className="muted">—</span> },
   ]
 
@@ -150,6 +171,9 @@ export function StudentsPage() {
               onClick={() => one && setEditing(one)}
             >
               수정
+            </Button>
+            <Button small disabled={!one} onClick={() => one && setTransferring(one)}>
+              전출 처리
             </Button>
             <Button
               small
@@ -201,6 +225,18 @@ export function StudentsPage() {
                 <option value="VOUCHER">방과후 이용권</option>
                 <option value="FREE_VOUCHER">자유수강권</option>
                 <option value="BOTH">이용권+자유수강권</option>
+              </Select>
+            </Field>
+            <Field label="재학상태">
+              <Select
+                value={enrolment}
+                onChange={(e) => setEnrolment(e.target.value)}
+                style={{ width: 120 }}
+              >
+                <option value="">전체</option>
+                <option value="ATTENDING">재학</option>
+                <option value="LEAVING">전출 예정</option>
+                <option value="LEFT">전출</option>
               </Select>
             </Field>
             <Field label="검색">
@@ -270,14 +306,31 @@ export function StudentsPage() {
         />
       )}
 
+      {transferring && (
+        <TransferModal
+          student={transferring}
+          onClose={() => setTransferring(null)}
+          onSaved={() => setTransferring(null)}
+        />
+      )}
+
       {confirm === 'some' && (
         <Confirm
           danger
           title="선택한 학생 삭제"
           message={
             <>
-              선택한 <b>{selected.length}명</b>을 지웁니다. 그 학생의 수강·지원자격 자료도 함께
-              사라집니다. 계속할까요?
+              선택한 <b>{selected.length}명</b>을 지웁니다.
+              <div style={{ marginTop: 8 }}>
+                삭제는 <b>잘못 등록했거나 두 번 등록한 학생</b>을 치울 때만 써 주세요.
+              </div>
+              <div style={{ marginTop: 6 }}>
+                실제로 학교를 떠난 학생은 지우지 말고 <b>[전출 처리]</b>를 이용해 주세요. 전출해도
+                지난 수강·금액·정산 기록은 그대로 남습니다.
+              </div>
+              <div className="hint" style={{ marginTop: 8 }}>
+                수강이나 정산 기록이 있는 학생은 자료가 함께 사라지지 않도록 삭제가 막힙니다.
+              </div>
             </>
           }
           busy={remove.isPending}

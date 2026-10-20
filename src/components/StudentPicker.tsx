@@ -13,6 +13,7 @@ import type { Student } from '@/ipc/types'
 import { api } from '@/ipc/api'
 import { useApp } from '@/lib/useApp'
 import { compareClassNo } from '@/lib/format'
+import { enrolmentShort } from '@/lib/transfer'
 
 import { Field, Input, Select } from './ui'
 
@@ -47,10 +48,16 @@ export function StudentPicker({
   const candidates = useMemo(() => {
     if (!grade || !classNo) return []
     const key = name.trim()
-    return rows
-      .filter((s) => s.grade === Number(grade) && s.classNo === classNo)
-      .filter((s) => !key || s.name.includes(key))
-      .sort((a, b) => a.studentNo - b.studentNo)
+    return (
+      rows
+        .filter((s) => s.grade === Number(grade) && s.classNo === classNo)
+        // 이미 떠난 학생은 새 수강에 넣을 수 없다 (v0.1.8). 고를 수 없게 아예
+        // 빼 둔다 — 골랐다가 저장할 때 막히면 왜 안 되는지 알기 어렵다.
+        // 전출 **예정**은 그날까지 재학생이라 남겨 두고 꼬리말로 알린다.
+        .filter((s) => s.enrolment !== 'LEFT')
+        .filter((s) => !key || s.name.includes(key))
+        .sort((a, b) => a.studentNo - b.studentNo)
+    )
   }, [rows, grade, classNo, name])
 
   return (
@@ -113,11 +120,15 @@ export function StudentPicker({
           }}
         >
           <option value="">선택</option>
-          {candidates.map((s) => (
-            <option key={s.id} value={s.id}>
-              {s.studentNo}번 {s.name}
-            </option>
-          ))}
+          {candidates.map((s) => {
+            const 꼬리 = enrolmentShort(s.enrolment, s.transferOutDate)
+            return (
+              <option key={s.id} value={s.id}>
+                {s.studentNo}번 {s.name}
+                {꼬리 && ` / ${꼬리}`}
+              </option>
+            )
+          })}
         </Select>
       </Field>
     </div>

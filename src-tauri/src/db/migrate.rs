@@ -72,6 +72,15 @@ const MIGRATIONS: &[Migration] = &[
         sql: include_str!("../../migrations/006_department_capacity.sql"),
         fk_off: false,
     },
+    // 전출일 칸 · 맞춤형 차시 칸 · 단가 칸과 새 표 둘. 기존 표를 고치지
+    // 않고 더하기만 하므로 자료판 트리거가 돌지 않고, 이미 만든 정산이
+    // 이 갱신 때문에 낡음이 되지 않는다.
+    Migration {
+        version: 7,
+        name: "007_transfer_and_custom",
+        sql: include_str!("../../migrations/007_transfer_and_custom.sql"),
+        fk_off: false,
+    },
 ];
 
 pub fn latest_version() -> i32 {

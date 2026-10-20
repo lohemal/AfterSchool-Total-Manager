@@ -8,6 +8,8 @@ import { invoke } from '@tauri-apps/api/core'
 import type { SortSpec } from '@/lib/sortSpec'
 
 import type {
+  CustomFeeReport,
+  TransferCheck,
   CapacityStats,
   SeatQuery,
   SeatResult,
@@ -159,6 +161,28 @@ export const api = {
   /** 화면 필터와 무관하게 작업공간 전체를 낸다 */
   capacityExport: (workspaceId: number) =>
     invoke<ExportResult>('capacity_export', { workspaceId }),
+
+  // ── 전출 (v0.1.8)
+  studentTransferCheck: (id: number, date: string | null) =>
+    invoke<TransferCheck>('student_transfer_check', { id, date }),
+  studentTransferSet: (id: number, date: string | null) =>
+    invoke<void>('student_transfer_set', { id, date }),
+
+  // ── 맞춤형 강사료 (v0.1.8)
+  customFeeReport: (workspaceId: number, includeAll: boolean) =>
+    invoke<CustomFeeReport>('custom_fee_report', { workspaceId, includeAll }),
+  customClosureAdd: (workspaceId: number, date: string, reason: string) =>
+    invoke<void>('custom_closure_add', { workspaceId, date, reason }),
+  customClosureDelete: (id: number) => invoke<void>('custom_closure_delete', { id }),
+  customSessionSet: (departmentId: number, date: string, sessions: number, reason: string) =>
+    invoke<void>('custom_session_set', { departmentId, date, sessions, reason }),
+  customSessionClear: (departmentId: number, date: string) =>
+    invoke<void>('custom_session_clear', { departmentId, date }),
+  customRateSet: (yearId: number, rate: number) =>
+    invoke<void>('custom_rate_set', { yearId, rate }),
+  /** 화면 필터와 무관하게 작업공간 전체를 낸다 */
+  customFeeExport: (workspaceId: number) =>
+    invoke<ExportResult>('custom_fee_export', { workspaceId }),
 
   // 지원금 정책 (설정 화면은 Phase 3)
   policyList: (yearId: number) => invoke<PolicyView[]>('policy_list', { yearId }),

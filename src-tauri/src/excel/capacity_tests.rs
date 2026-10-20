@@ -75,6 +75,7 @@ impl F {
                         }],
                         capacity: cap,
                         allowed_grades: grades.to_vec(),
+                        custom_sessions: 0,
                     },
                 )
             })
