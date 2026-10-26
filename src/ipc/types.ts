@@ -1020,3 +1020,27 @@ export interface CustomFeeReport {
   /** 기간 밖이거나 효력 없는 기록 — 지우지 않고 알린다 */
   orphans: OrphanSession[]
 }
+
+/** 기록을 지우면 학생 금액이 어떻게 되는가 (v0.1.9) */
+export interface RevertRow {
+  adjustmentId: number
+  kind: string
+  source: AdjustmentSource
+  studentLabel: string
+  deptLabel: string
+  amount: number
+  /** 차액 기록이면 true — 지우면 금액도 되돌린다 */
+  reverts: boolean
+  chargeBefore: number
+  chargeAfter: number
+  /** 되돌릴 수 없어 막히는 까닭 */
+  blocked: string | null
+}
+
+export interface RevertPreview {
+  rows: RevertRow[]
+  students: number
+  refundTotal: number
+  additionalTotal: number
+  blocked: boolean
+}

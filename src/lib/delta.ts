@@ -10,7 +10,7 @@
  * 않는다.
  */
 
-import type { Fee } from '@/ipc/types'
+import type { Fee, RevertPreview, RevertRow } from '@/ipc/types'
 
 export interface ItemDelta {
   itemCode: string
@@ -74,4 +74,36 @@ export const SOURCE_TEXT: Record<string, string> = {
   CANCEL: '수강취소',
   DEPT_BATCH: '부서일괄',
   INDIVIDUAL: '개별조정',
+}
+
+/**
+ * 기록 하나를 지울 때 금액이 어떻게 되는가 (v0.1.9).
+ *
+ * 차액 기록(부서일괄·개별조정)을 지우면 그 기록이 만든 금액 변화도 함께 되돌린다.
+ * 기존 기록·중도추가·수강취소는 예전처럼 기록만 지운다.
+ */
+export function revertSentence(r: RevertRow, won: (n: number) => string): string {
+  const what = r.kind === 'REFUND' ? '환불' : '추가징수'
+  if (!r.reverts) {
+    return `‘${SOURCE_TEXT[r.source] ?? r.source}’ 기록이라 기록만 지웁니다. 학생의 금액(${won(r.chargeBefore)}원)은 그대로입니다.`
+  }
+  return `이 ${what} 기록을 삭제하면 학생의 금액도 ${won(r.chargeBefore)}원에서 ${won(r.chargeAfter)}원으로 되돌아갑니다.`
+}
+
+/** 묶음(부서 일괄)을 지울 때의 한 줄 안내 */
+export function batchRevertSentence(p: RevertPreview): string {
+  const what =
+    p.refundTotal > 0 && p.additionalTotal > 0
+      ? '환불·추가징수'
+      : p.refundTotal > 0
+        ? '환불'
+        : '추가징수'
+  return `일괄 ${what} 기록을 삭제하면 대상 학생 ${p.students}명의 ${what} 기록이 삭제되고 해당 금액도 함께 원복됩니다.`
+}
+
+/** 지운 뒤 학생 금액 합계가 얼마나 움직이는가 (늘면 양수) */
+export function revertShift(p: RevertPreview): number {
+  return p.rows
+    .filter((r) => r.reverts && !r.blocked)
+    .reduce((s, r) => s + (r.chargeAfter - r.chargeBefore), 0)
 }

@@ -835,6 +835,42 @@ pub struct DeltaRegister {
     pub note: Option<String>,
 }
 
+/// 추가징수·환불 기록을 지우면 무엇이 되는가 (v0.1.9) — 지우기 전 확인창이 보여 준다.
+///
+/// 차액 기록(부서일괄·개별조정)은 지우면 **그 기록이 만든 금액 변화도 함께 되돌린다.**
+/// 기존 기록(기존·중도추가·수강취소)은 예전처럼 기록만 지운다.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RevertRow {
+    pub adjustment_id: i64,
+    pub kind: String,
+    pub source: String,
+    pub student_label: String,
+    pub dept_label: String,
+    /// 기록 금액 합계
+    pub amount: i64,
+    /// 금액을 되돌리는가 (차액 기록이면 true)
+    pub reverts: bool,
+    /// 지금 학생 금액 합계
+    pub charge_before: i64,
+    /// 지운 뒤 학생 금액 합계 (되돌리지 않으면 지금과 같다)
+    pub charge_after: i64,
+    /// 되돌릴 수 없어 막히는 까닭. 비어 있으면 지울 수 있다.
+    pub blocked: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RevertPreview {
+    pub rows: Vec<RevertRow>,
+    /// 금액이 되돌려지는 학생 수
+    pub students: i64,
+    pub refund_total: i64,
+    pub additional_total: i64,
+    /// 하나라도 막히면 아무것도 지우지 않는다
+    pub blocked: bool,
+}
+
 /// 부서 일괄 결과.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]

@@ -140,6 +140,8 @@ pub fn run() {
             commands::enrollment::adjustment_batch_create,
             commands::enrollment::adjustment_batches,
             commands::enrollment::adjustment_batch_delete,
+            commands::enrollment::adjustment_delete_preview,
+            commands::enrollment::adjustment_batch_delete_preview,
             commands::policy::policy_list,
             commands::policy::policy_save,
             commands::settle::settlement_status,

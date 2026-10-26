@@ -642,33 +642,6 @@ fn 일괄이_중간에_실패하면_반쪽이_남지_않는다() {
     );
 }
 
-#[test]
-fn 묶음을_지우면_딸린_기록이_함께_지워지고_금액은_그대로다() {
-    let f = F::new();
-    let d = f.dept("미술", 35_000);
-    let es = f.fill(d, 18);
-    f.set_base(d, "미술", 30_000);
-    let batch = f.일괄(d, &es, 등록("휴강")).unwrap().batch_id.unwrap();
-
-    let n = f
-        .db
-        .write(|c| repo::adjustment::delete_batch(c, batch))
-        .unwrap();
-    assert_eq!(n, 18);
-    assert_eq!(f.한개("SELECT COUNT(*) FROM billing_adjustment"), 0);
-    assert_eq!(f.한개("SELECT COUNT(*) FROM billing_batch"), 0);
-    // 기록만 지운다 — 바뀐 금액은 되돌리지 않는다
-    assert!(es.iter().all(|e| f.charge(*e) == 30_000));
-
-    // 이력에 한 줄씩 남는다 (학생마다 18줄이 아니다)
-    let logs = f
-        .db
-        .read(|c| repo::change_log::list(c, f.year, Some(f.ws), None, None, 200))
-        .unwrap();
-    let 만듦 = logs.iter().filter(|l| l.kind == "ADJUST_BATCH_ADD").count();
-    let 지움 = logs.iter().filter(|l| l.kind == "ADJUST_BATCH_DELETE").count();
-    assert_eq!((만듦, 지움), (1, 1));
-}
 
 // ═══════════════════════════════════════════════ 발생 유형
 

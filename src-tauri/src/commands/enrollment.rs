@@ -377,8 +377,32 @@ pub fn adjustment_batches(
     db.read(|c| repo::adjustment::batches(c, workspace_id))
 }
 
-/// 묶음을 한 번에 지운다. **금액은 되돌리지 않는다** — 기록만 지운다.
+/// 묶음을 한 번에 지운다. 딸린 기록마다 그 차액을 학생 금액에 되돌린다 (v0.1.9).
 #[tauri::command]
 pub fn adjustment_batch_delete(db: State<'_, Db>, batch_id: i64) -> AppResult<usize> {
     db.write(|c| repo::adjustment::delete_batch(c, batch_id))
+}
+
+/// 기록을 지우면 학생 금액이 어떻게 되는지 미리 본다. **아무것도 고치지 않는다.**
+#[tauri::command]
+pub fn adjustment_delete_preview(
+    db: State<'_, Db>,
+    ids: Vec<i64>,
+) -> AppResult<crate::model::RevertPreview> {
+    db.read(|c| {
+        let items = repo::cost_items(c)?;
+        repo::adjustment::delete_preview(c, &ids, &items)
+    })
+}
+
+/// 묶음을 지우면 어떻게 되는지 미리 본다.
+#[tauri::command]
+pub fn adjustment_batch_delete_preview(
+    db: State<'_, Db>,
+    batch_id: i64,
+) -> AppResult<crate::model::RevertPreview> {
+    db.read(|c| {
+        let items = repo::cost_items(c)?;
+        repo::adjustment::batch_delete_preview(c, batch_id, &items)
+    })
 }

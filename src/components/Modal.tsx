@@ -99,6 +99,7 @@ export function Confirm({
   onConfirm,
   onClose,
   busy,
+  disabled,
 }: {
   title: string
   message: ReactNode
@@ -107,6 +108,8 @@ export function Confirm({
   onConfirm: () => void
   onClose: () => void
   busy?: boolean
+  /** 확인 단추만 막는다 (취소는 그대로) */
+  disabled?: boolean
 }) {
   return (
     <Modal
@@ -117,7 +120,7 @@ export function Confirm({
           <Button onClick={onClose} disabled={busy}>
             취소
           </Button>
-          <Button variant={danger ? 'danger' : 'primary'} onClick={onConfirm} disabled={busy}>
+          <Button variant={danger ? 'danger' : 'primary'} onClick={onConfirm} disabled={busy || disabled}>
             {busy ? '처리 중…' : confirmText}
           </Button>
         </>

@@ -44,6 +44,8 @@ pub const ADJUST_ADD: &str = "ADJUST_ADD";
 /// 부서 일괄 추가징수·환불 등록·삭제 (v0.1.9)
 pub const ADJUST_BATCH_ADD: &str = "ADJUST_BATCH_ADD";
 pub const ADJUST_BATCH_DELETE: &str = "ADJUST_BATCH_DELETE";
+/// 차액 기록 한 건 삭제 + 그 차액 원복 (v0.1.9)
+pub const ADJUST_DELETE: &str = "ADJUST_DELETE";
 /// 새 작업공간을 만들며 기존 작업공간의 운영자료를 가져온 일 (v0.1.6)
 pub const WS_IMPORT: &str = "WS_IMPORT";
 
@@ -71,6 +73,7 @@ pub fn kind_label(kind: &str) -> &'static str {
         ADJUST_ADD => "추가징수·환불 등록",
         ADJUST_BATCH_ADD => "부서 일괄 추가징수·환불",
         ADJUST_BATCH_DELETE => "부서 일괄 조정 삭제",
+        ADJUST_DELETE => "추가징수·환불 삭제·원복",
         "ELIGIBILITY" => "지원자격 변경",
         "GRANT" => "지원금 변경",
         "POLICY" => "지원정책 변경",

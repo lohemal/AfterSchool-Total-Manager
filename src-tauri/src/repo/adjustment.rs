@@ -37,6 +37,7 @@ use crate::error::{AppError, AppResult};
 use crate::model::{
     Adjustment, AdjustmentDiff, AdjustmentFee, AdjustmentFilter, AdjustmentInput,
     AdjustmentReport, AdjustmentView, BatchResult, BillingBatch, CostItem, DeltaRegister, Enrollment,
+    RevertPreview, RevertRow,
     Fee, FeePick, StudentSumRow,
 };
 use crate::repo;
@@ -909,12 +910,289 @@ pub fn confirm(conn: &Connection, ids: &[i64], mode: &str) -> AppResult<i64> {
 }
 
 /// 기록을 지운다. 사람이 고른 것만 지운다.
+///
+/// ## 차액 기록은 금액도 함께 되돌린다 (v0.1.9)
+///
+/// 부서일괄·개별조정 기록은 **charge 를 바꾸면서** 만들어졌다. 그 기록만 지우면
+/// 환불은 사라졌는데 깎인 금액은 남아, 왜 30,000 인지 아무도 설명할 수 없게 된다.
+/// 그래서 지우면 **그 기록의 차액만큼만** 되돌린다 (`revert_plan`).
+///
+/// 기존·중도추가·수강취소 기록은 예전처럼 기록만 지운다. 그 기록들은 charge 를
+/// 바꾼 것이 아니라 이미 정해진 금액을 적어 둔 것이기 때문이다.
+///
+/// 하나라도 되돌릴 수 없으면 **아무것도 지우지 않는다** — 부르는 쪽이 한
+/// 트랜잭션으로 감싸므로, 앞에서 되돌린 것도 함께 취소된다.
 pub fn delete_many(conn: &Connection, ids: &[i64]) -> AppResult<usize> {
+    let items = repo::cost_items(conn)?;
     let mut n = 0;
+    let mut batches_touched: Vec<i64> = Vec::new();
     for id in ids {
-        n += conn.execute("DELETE FROM billing_adjustment WHERE id = ?1", params![id])?;
+        let batch: Option<i64> = conn
+            .query_row(
+                "SELECT batch_id FROM billing_adjustment WHERE id = ?1",
+                params![id],
+                |r| r.get(0),
+            )
+            .optional()?
+            .flatten();
+        revert_and_delete(conn, *id, &items, true)?;
+        n += 1;
+        if let Some(b) = batch {
+            batches_touched.push(b);
+        }
+    }
+    // 한 건씩 지우다 묶음이 비면 묶음도 치운다 — 딸린 기록 없는 묶음은 뜻이 없다.
+    batches_touched.sort_unstable();
+    batches_touched.dedup();
+    for b in batches_touched {
+        conn.execute(
+            "DELETE FROM billing_batch
+              WHERE id = ?1 AND NOT EXISTS (SELECT 1 FROM billing_adjustment WHERE batch_id = ?1)",
+            params![b],
+        )?;
     }
     Ok(n)
+}
+
+/// 기록 하나를 지우면 학생 금액이 어떻게 되는가. **아무것도 고치지 않는다.**
+///
+/// ## 왜 '차액만' 되돌리는가
+///
+/// '처음 금액'으로 되돌리면 안 된다. 35,000 에서 5,000·3,000 을 차례로 환불했다면
+/// 5,000 기록을 지웠을 때 3,000 환불은 여전히 살아 있어야 한다.
+///
+/// ```text
+/// 환불 기록을 지운다      금액 += 그 기록의 금액
+/// 추가징수 기록을 지운다  금액 -= 그 기록의 금액
+/// 27,000 에서 5,000 환불을 지우면 32,000 (35,000 이 아니다)
+/// ```
+///
+/// ## 언제 막는가 — 확인값이 지금 금액과 다를 때
+///
+/// 기록의 `checked_charge` 는 '이 기록이 마지막으로 맞춰 본 그때의 금액'이다.
+/// 지금 금액과 같다면, 이 기록 뒤의 변화는 모두 다른 기록(또는 [현재 금액 반영])이
+/// 설명한 것이다 — 그때는 차액만 빼고 더해도 정확하다. 다르다면 **아무도 설명하지
+/// 않은 변화**가 끼어 있다(누가 '금액만' 다시 고쳤다). 그 변화와 이 기록이 서로
+/// 어떤 관계인지 프로그램은 알 수 없으므로, 짐작으로 고치지 않고 막는다.
+///
+/// 여러 차액 기록이 있어도 막히지 않는 까닭: 새 차액 기록을 만들 때와 기록을
+/// 되돌릴 때마다 형제 기록의 확인값을 함께 옮겨 두기 때문이다.
+///
+/// 취소한 수강 건도 막는다. 그 금액은 취소 환불의 기준이 되므로, 차액을 되돌리면
+/// 취소 환불 기록이 틀어진다.
+pub fn revert_plan(conn: &Connection, id: i64, items: &[CostItem]) -> AppResult<RevertRow> {
+    #[allow(clippy::type_complexity)]
+    let (kind, source, enrollment_id): (String, String, i64) = conn
+        .query_row(
+            "SELECT kind, source, enrollment_id FROM billing_adjustment WHERE id = ?1",
+            params![id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .optional()?
+        .ok_or_else(|| AppError::not_found("기록을 찾지 못했습니다."))?;
+    let e = repo::enrollment::get(conn, enrollment_id, items)?;
+    let charge_before: i64 = e.fees.iter().map(|f| f.amount).sum();
+
+    let mut st = conn.prepare(
+        "SELECT m.item_code, m.amount, m.checked_charge, COALESCE(c.amount, 0)
+           FROM billing_adjustment_amount m
+           LEFT JOIN charge c ON c.enrollment_id = ?2 AND c.item_code = m.item_code
+          WHERE m.adjustment_id = ?1",
+    )?;
+    let cells: Vec<(String, i64, i64, i64)> = st
+        .query_map(params![id, enrollment_id], |r| {
+            Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    drop(st);
+    let amount: i64 = cells.iter().map(|c| c.1).sum();
+
+    let mut row = RevertRow {
+        adjustment_id: id,
+        kind: kind.clone(),
+        source: source.clone(),
+        student_label: student_label(e.grade, &e.class_no, e.student_no, &e.name),
+        dept_label: e.dept_label.clone(),
+        amount,
+        reverts: is_delta(&source),
+        charge_before,
+        charge_after: charge_before,
+        blocked: None,
+    };
+    if !row.reverts {
+        return Ok(row); // 기존 기록 — 기록만 지운다 (v0.1.8 그대로)
+    }
+
+    if e.status != "ACTIVE" {
+        row.blocked = Some(
+            "취소한 수강 건이라 금액을 자동으로 되돌리지 않습니다. 이 금액은 취소 환불의 \
+             기준이 되므로, 수강생 명단에서 확인한 뒤 직접 정정해 주세요."
+                .into(),
+        );
+        return Ok(row);
+    }
+
+    let mut after = charge_before;
+    for (code, amt, checked, now) in &cells {
+        if *amt == 0 {
+            continue; // 이 기록이 움직이지 않은 항목
+        }
+        if checked != now {
+            row.blocked = Some(
+                "이 조정 이후 금액이 따로 다시 변경되어 자동으로 되돌릴 수 없습니다. \
+                 현재 금액을 확인한 후 직접 정정해 주세요."
+                    .into(),
+            );
+            return Ok(row);
+        }
+        let next = if kind == REFUND { now + amt } else { now - amt };
+        if next < 0 {
+            let name = items
+                .iter()
+                .find(|i| &i.code == code)
+                .map(|i| i.name.as_str())
+                .unwrap_or("");
+            row.blocked = Some(format!(
+                "되돌리면 {name}이 0원보다 적어집니다. 현재 금액을 확인한 후 직접 정정해 주세요."
+            ));
+            return Ok(row);
+        }
+        after += if kind == REFUND { *amt } else { -*amt };
+    }
+    row.charge_after = after;
+    Ok(row)
+}
+
+/// 여러 기록을 지웠을 때의 모습. 확인창이 쓴다. **아무것도 고치지 않는다.**
+///
+/// 같은 학생의 기록을 여럿 고르면 앞 기록을 되돌린 결과 위에서 뒤 기록을 따져야
+/// 맞으므로, 실제로 되돌려 보고 트랜잭션을 버리는 대신 **차례대로 셈한다**:
+/// 학생마다 금액이 바뀐 만큼을 이어서 더한다.
+pub fn delete_preview(conn: &Connection, ids: &[i64], items: &[CostItem]) -> AppResult<RevertPreview> {
+    let mut rows = Vec::new();
+    let mut shift: HashMap<String, i64> = HashMap::new(); // 학생/부서 → 앞에서 바뀐 금액
+    for id in ids {
+        let mut r = revert_plan(conn, *id, items)?;
+        let key = format!("{}|{}", r.student_label, r.dept_label);
+        let moved = shift.get(&key).copied().unwrap_or(0);
+        r.charge_before += moved;
+        r.charge_after += moved;
+        if r.reverts && r.blocked.is_none() {
+            shift.insert(key, moved + (r.charge_after - r.charge_before));
+        }
+        rows.push(r);
+    }
+    Ok(summarize_revert(rows))
+}
+
+fn summarize_revert(rows: Vec<RevertRow>) -> RevertPreview {
+    let mut students: Vec<&str> = rows
+        .iter()
+        .filter(|r| r.reverts)
+        .map(|r| r.student_label.as_str())
+        .collect();
+    students.sort_unstable();
+    students.dedup();
+    let refund_total = rows.iter().filter(|r| r.kind == REFUND).map(|r| r.amount).sum();
+    let additional_total = rows.iter().filter(|r| r.kind != REFUND).map(|r| r.amount).sum();
+    let blocked = rows.iter().any(|r| r.blocked.is_some());
+    RevertPreview {
+        students: students.len() as i64,
+        refund_total,
+        additional_total,
+        blocked,
+        rows,
+    }
+}
+
+/// 묶음을 지우면 어떻게 되는가.
+pub fn batch_delete_preview(conn: &Connection, batch_id: i64, items: &[CostItem]) -> AppResult<RevertPreview> {
+    let ids = batch_members(conn, batch_id)?;
+    delete_preview(conn, &ids, items)
+}
+
+fn batch_members(conn: &Connection, batch_id: i64) -> AppResult<Vec<i64>> {
+    let mut st = conn.prepare("SELECT id FROM billing_adjustment WHERE batch_id = ?1 ORDER BY id")?;
+    let ids = st
+        .query_map(params![batch_id], |r| r.get(0))?
+        .collect::<rusqlite::Result<Vec<i64>>>()?;
+    Ok(ids)
+}
+
+/// 기록 하나를 지우고, 차액 기록이면 그 차액을 charge 에 되돌린다.
+///
+/// 금액은 **표준 금액 쓰기 길**(`enrollment::update_fees`)로 바꾼다. 그래야 자료판
+/// 트리거가 그대로 돌아 정산이 낡음이 되고, 학생별 금액 변화가 `CHARGE_EDIT` 로
+/// 남는다 — 따로 자료판을 올리거나 이력을 꾸며 넣지 않는다.
+fn revert_and_delete(conn: &Connection, id: i64, items: &[CostItem], log_each: bool) -> AppResult<()> {
+    let plan = revert_plan(conn, id, items)?;
+    if let Some(why) = &plan.blocked {
+        return Err(AppError::invalid(format!(
+            "{} / {} — {why}",
+            plan.student_label, plan.dept_label
+        )));
+    }
+
+    if plan.reverts {
+        let (kind, enrollment_id, note): (String, i64, String) = conn.query_row(
+            "SELECT kind, enrollment_id, note FROM billing_adjustment WHERE id = ?1",
+            params![id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )?;
+        let before = repo::enrollment::get(conn, enrollment_id, items)?;
+
+        let mut st = conn.prepare(
+            "SELECT item_code, amount FROM billing_adjustment_amount WHERE adjustment_id = ?1",
+        )?;
+        let mine: HashMap<String, i64> = st
+            .query_map(params![id], |r| Ok((r.get(0)?, r.get(1)?)))?
+            .collect::<rusqlite::Result<_>>()?;
+        drop(st);
+
+        let fees: Vec<Fee> = items
+            .iter()
+            .map(|it| {
+                let now = fee_of(&before.fees, &it.code);
+                let d = mine.get(&it.code).copied().unwrap_or(0);
+                Fee {
+                    item_code: it.code.clone(),
+                    amount: if kind == REFUND { now + d } else { now - d },
+                }
+            })
+            .collect();
+        let what = if kind == REFUND { "환불" } else { "추가징수" };
+        repo::enrollment::update_fees(
+            conn,
+            enrollment_id,
+            &fees,
+            &format!("{what} 기록 삭제로 원복 — {note}"),
+            items,
+        )?;
+
+        // 이 변화는 방금 지운 기록이 설명한다. 남은 형제 기록이 이것을 '아무도 설명하지
+        // 않은 변화'로 잡아 확인 필요로 뜨지 않게, 그 확인값을 함께 옮긴다.
+        let after = repo::enrollment::get(conn, enrollment_id, items)?;
+        acknowledge_siblings(conn, enrollment_id, &[id], &before, &after, items)?;
+
+        if log_each {
+            let ws = workspace_of(conn, enrollment_id)?;
+            repo::change_log::write(
+                conn,
+                repo::enrollment::year_of_workspace(conn, ws)?,
+                Some(ws),
+                repo::change_log::ADJUST_DELETE,
+                Some(before.student_id),
+                Some(before.department_id),
+                &format!("{} / {}", plan.student_label, plan.dept_label),
+                &format!("{what} {}원 · 금액 {}원", won(plan.amount), won(plan.charge_before)),
+                &format!("기록 삭제 · 금액 {}원으로 원복", won(plan.charge_after)),
+                &note,
+            )?;
+        }
+    }
+
+    conn.execute("DELETE FROM billing_adjustment WHERE id = ?1", params![id])?;
+    Ok(())
 }
 
 // ─────────────────────────────────────────────── 지우기를 막는다
@@ -1272,13 +1550,17 @@ pub fn batches(conn: &Connection, workspace_id: i64) -> AppResult<Vec<BillingBat
 
 /// 부서 일괄 묶음을 한 번에 지운다.
 ///
-/// ## 금액은 되돌리지 않는다
+/// ## 금액도 함께 되돌린다 (v0.1.9 후보 수정)
 ///
-/// 추가징수·환불 기록을 지우는 것은 **기록을 지우는 것**이다. 기존 기록 삭제도
-/// 늘 그랬다 — 취소 환불 기록을 지워도 수강 취소가 되돌려지지 않는다. 금액까지
-/// 되돌리고 싶으면 부서 기준금액을 고쳐 [부서금액 반영]을 다시 하면 된다.
-/// 자동으로 되돌리면, 기록은 잘못 남겼지만 금액 변경은 맞았던 경우에 바른
-/// 금액까지 망가진다.
+/// 묶음은 학생마다 charge 를 바꾸면서 만들어졌다. 기록만 지우면 환불은 사라졌는데
+/// 깎인 금액이 남아 추적이 오히려 어려워진다. 그래서 딸린 기록마다 **그 기록의
+/// 차액만큼** 되돌린다 — 묶음에서 뺐던 학생은 처음부터 기록이 없으니 그대로다.
+///
+/// 한 학생이라도 되돌릴 수 없으면(그 뒤 금액을 따로 다시 고쳤다면) **아무도
+/// 되돌리지 않는다.** 부르는 쪽이 한 트랜잭션으로 감싼다.
+///
+/// 이력은 묶음에 한 줄(`ADJUST_BATCH_DELETE`)이고, 학생마다 바뀐 금액은 표준 금액
+/// 쓰기가 `CHARGE_EDIT` 로 남긴다 — 누구의 얼마가 되돌려졌는지 그대로 읽힌다.
 pub fn delete_batch(conn: &Connection, batch_id: i64) -> AppResult<usize> {
     #[allow(clippy::type_complexity)]
     let (workspace_id, department_id, dlabel, occurred, note): (i64, i64, String, String, String) =
@@ -1304,10 +1586,28 @@ pub fn delete_batch(conn: &Connection, batch_id: i64) -> AppResult<usize> {
         })
         .unwrap_or_default();
 
-    let n = conn.execute(
-        "DELETE FROM billing_adjustment WHERE batch_id = ?1",
-        params![batch_id],
-    )?;
+    // 먼저 모두 따져 본다 — 하나라도 막히면 무엇이 막혔는지 한꺼번에 알려 준다.
+    let items = repo::cost_items(conn)?;
+    let ids = batch_members(conn, batch_id)?;
+    let preview = delete_preview(conn, &ids, &items)?;
+    if preview.blocked {
+        let who: Vec<String> = preview
+            .rows
+            .iter()
+            .filter(|r| r.blocked.is_some())
+            .map(|r| r.student_label.clone())
+            .collect();
+        return Err(AppError::invalid(format!(
+            "이 묶음 뒤에 금액이 따로 다시 변경된 학생이 있어 자동으로 되돌릴 수 없습니다 \
+             ({}). 현재 금액을 확인한 후 직접 정정해 주세요. 아무것도 지우지 않았습니다.",
+            who.join(" · ")
+        )));
+    }
+
+    for id in &ids {
+        revert_and_delete(conn, *id, &items, false)?; // 이력은 묶음에 한 줄로 남긴다
+    }
+    let n = ids.len();
     conn.execute("DELETE FROM billing_batch WHERE id = ?1", params![batch_id])?;
 
     let year_id = repo::enrollment::year_of_workspace(conn, workspace_id)?;
@@ -1320,7 +1620,7 @@ pub fn delete_batch(conn: &Connection, batch_id: i64) -> AppResult<usize> {
         Some(department_id),
         &format!("{dlabel} · {occurred}"),
         &summary,
-        "삭제",
+        "기록 삭제 · 대상 학생 금액 원복",
         &note,
     )?;
     Ok(n)

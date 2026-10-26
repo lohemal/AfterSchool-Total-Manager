@@ -31,7 +31,7 @@ import type {
   BillingBatch,
   StudentSumRow,
 } from '@/ipc/types'
-import { SOURCE_TEXT } from '@/lib/delta'
+import { batchRevertSentence, revertSentence, revertShift, SOURCE_TEXT } from '@/lib/delta'
 import { compareClassNo, studentLabel, won } from '@/lib/format'
 import { saveExport } from '@/lib/saveFile'
 import { useApp } from '@/lib/useApp'
@@ -144,7 +144,8 @@ export function AdjustmentPage() {
   const remove = useMutation({
     mutationFn: (id: number) => api.adjustmentDelete([id]),
     onSuccess: () => {
-      toast.ok('기록을 지웠습니다.')
+      const reverts = removing?.source === 'DEPT_BATCH' || removing?.source === 'INDIVIDUAL'
+      toast.ok(reverts ? '기록을 지우고 학생 금액을 되돌렸습니다.' : '기록을 지웠습니다.')
       setRemoving(null)
       setDetail(null)
       void qc.invalidateQueries()
@@ -443,21 +444,8 @@ export function AdjustmentPage() {
       )}
 
       {removing && (
-        <Confirm
-          danger
-          title="기록 삭제"
-          message={
-            <>
-              <b>{removing.studentLabelAt}</b> / {removing.deptLabelAt} 의{' '}
-              {removing.kind === 'REFUND' ? '환불' : '추가징수'} 기록({won(removing.total)}원)을
-              지웁니다.
-              <div className="hint" style={{ marginTop: 6 }}>
-                수강 자료와 금액은 그대로입니다. 돈이 오간 기록이므로 지운 뒤에는 되돌릴 수
-                없습니다.
-              </div>
-            </>
-          }
-          confirmText="지우기"
+        <RemoveConfirm
+          target={removing}
           busy={remove.isPending}
           onClose={() => setRemoving(null)}
           onConfirm={() => remove.mutate(removing.id)}
@@ -809,8 +797,9 @@ function DiffModal({
  * '이 18건이 왜 한꺼번에 생겼는가'를 보여 주고, 잘못 등록한 묶음을 학생마다
  * 찾아가지 않고 **한 번에** 지운다.
  *
- * 지우는 것은 **기록**이다. 바뀐 금액은 되돌리지 않는다 — 기존 기록 삭제도 늘
- * 그랬다. 금액까지 되돌리려면 부서 기준금액을 고쳐 [부서금액 반영]을 다시 한다.
+ * 묶음을 지우면 딸린 기록마다 **그 기록이 만든 차액만큼** 학생 금액을 되돌린다
+ * (원래 금액으로 덮지 않는다). 한 학생이라도 안전하게 되돌릴 수 없으면 묶음
+ * 전체를 지우지 않는다. 부서 기준금액은 건드리지 않는다.
  */
 function BatchModal({
   workspaceId,
@@ -832,7 +821,7 @@ function BatchModal({
   const remove = useMutation({
     mutationFn: (id: number) => api.adjustmentBatchDelete(id),
     onSuccess: (n) => {
-      toast.ok(`일괄 조정 ${n}건을 지웠습니다. 바뀐 금액은 그대로입니다.`)
+      toast.ok(`일괄 조정 ${n}건을 지우고 대상 학생의 금액을 되돌렸습니다.`)
       setRemoving(null)
       void list.refetch()
       onDone()
@@ -892,27 +881,188 @@ function BatchModal({
       </Modal>
 
       {removing && (
-        <Confirm
-          danger
-          title="일괄 조정 삭제"
-          confirmText="묶음 삭제"
-          message={
-            <>
-              <b>
-                {removing.deptLabel} · {removing.occurredOn}
-              </b>{' '}
-              ({removing.note})의 기록 <b>{removing.count}건</b>을 한 번에 지웁니다.
-              <div style={{ marginTop: 8 }}>
-                <b>바뀐 금액은 되돌리지 않습니다.</b> 추가징수·환불 기록만 지웁니다. 금액까지
-                되돌리려면 부서 기준금액을 고쳐 [부서금액 반영]을 다시 해 주세요.
-              </div>
-            </>
-          }
+        <BatchRemoveConfirm
+          batch={removing}
           busy={remove.isPending}
           onConfirm={() => remove.mutate(removing.id)}
           onClose={() => setRemoving(null)}
         />
       )}
     </>
+  )
+}
+
+/**
+ * 기록 하나 삭제 확인.
+ *
+ * 지우기 전에 서버에 '지우면 금액이 어떻게 되는가'를 묻는다. 차액 기록인데 그 뒤
+ * 금액이 따로 바뀌었으면 막는 까닭을 보여 주고 확인 단추를 잠근다.
+ */
+function RemoveConfirm({
+  target,
+  busy,
+  onClose,
+  onConfirm,
+}: {
+  target: Adjustment
+  busy: boolean
+  onClose: () => void
+  onConfirm: () => void
+}) {
+  const preview = useQuery({
+    queryKey: ['adjustment-delete-preview', target.id],
+    queryFn: () => api.adjustmentDeletePreview([target.id]),
+  })
+  const r = preview.data?.rows[0]
+
+  return (
+    <Confirm
+      danger
+      title="기록 삭제"
+      message={
+        <>
+          <b>{target.studentLabelAt}</b> / {target.deptLabelAt} 의{' '}
+          {target.kind === 'REFUND' ? '환불' : '추가징수'} 기록({won(target.total)}원)을 지웁니다.
+          <div style={{ marginTop: 8 }}>
+            {preview.isLoading && <span className="hint">금액 확인 중…</span>}
+            {preview.isError && <Notice tone="bad">{errorMessage(preview.error)}</Notice>}
+            {r && r.blocked && <Notice tone="bad">{r.blocked}</Notice>}
+            {r && !r.blocked && (
+              <span>
+                {r.reverts ? <b>{revertSentence(r, won)}</b> : revertSentence(r, won)}
+              </span>
+            )}
+          </div>
+          <div className="hint" style={{ marginTop: 6 }}>
+            돈이 오간 기록이므로 지운 뒤에는 기록을 되살릴 수 없습니다.
+          </div>
+        </>
+      }
+      confirmText="지우기"
+      busy={busy}
+      disabled={!r || !!r.blocked}
+      onClose={onClose}
+      onConfirm={onConfirm}
+    />
+  )
+}
+
+/** 묶음 삭제 확인 — 대상 학생 수·조정 총액·원복 후 금액을 미리 보여 준다. */
+function BatchRemoveConfirm({
+  batch,
+  busy,
+  onClose,
+  onConfirm,
+}: {
+  batch: BillingBatch
+  busy: boolean
+  onClose: () => void
+  onConfirm: () => void
+}) {
+  const preview = useQuery({
+    queryKey: ['adjustment-batch-delete-preview', batch.id],
+    queryFn: () => api.adjustmentBatchDeletePreview(batch.id),
+  })
+  const p = preview.data
+  const blockedRows = p?.rows.filter((r) => r.blocked) ?? []
+  const shift = p ? revertShift(p) : 0
+
+  return (
+    <Confirm
+      danger
+      title="일괄 조정 삭제"
+      confirmText="묶음 삭제"
+      message={
+        <>
+          <b>
+            {batch.deptLabel} · {batch.occurredOn}
+          </b>{' '}
+          ({batch.note})의 기록 <b>{batch.count}건</b>을 한 번에 지웁니다.
+          {preview.isLoading && <div className="hint">금액 확인 중…</div>}
+          {preview.isError && <Notice tone="bad">{errorMessage(preview.error)}</Notice>}
+          {p && (
+            <>
+              <div style={{ marginTop: 8 }}>
+                <b>{batchRevertSentence(p)}</b>
+              </div>
+              <table className="table" style={{ marginTop: 8 }}>
+                <tbody>
+                  <tr>
+                    <td className="left">대상 학생</td>
+                    <td className="num">{p.students}명</td>
+                  </tr>
+                  {p.refundTotal > 0 && (
+                    <tr>
+                      <td className="left">지울 환불 총액</td>
+                      <td className="num">{won(p.refundTotal)}원</td>
+                    </tr>
+                  )}
+                  {p.additionalTotal > 0 && (
+                    <tr>
+                      <td className="left">지울 추가징수 총액</td>
+                      <td className="num">{won(p.additionalTotal)}원</td>
+                    </tr>
+                  )}
+                  {!p.blocked && (
+                    <tr>
+                      <td className="left">원복 후 학생 금액 합계</td>
+                      <td className="num">
+                        {shift >= 0 ? '+' : '−'}
+                        {won(Math.abs(shift))}원
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+              {!p.blocked && p.rows.length > 0 && (
+                <div style={{ maxHeight: 180, overflow: 'auto', marginTop: 8 }}>
+                  <table className="table">
+                    <thead>
+                      <tr>
+                        <th className="left">학생</th>
+                        <th className="num">지금</th>
+                        <th className="num">원복 후</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {p.rows.map((r) => (
+                        <tr key={r.adjustmentId}>
+                          <td className="left">{r.studentLabel}</td>
+                          <td className="num">{won(r.chargeBefore)}원</td>
+                          <td className="num">{won(r.chargeAfter)}원</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+              {p.blocked && (
+                <div style={{ marginTop: 8 }}>
+                  <Notice tone="bad">
+                    아래 학생은 금액을 자동으로 되돌릴 수 없어 묶음을 지우지 않습니다. 이
+                    학생의 기록을 먼저 확인해 정정하거나 한 건씩 정리해 주세요.
+                    <ul style={{ margin: '6px 0 0', paddingLeft: 18 }}>
+                      {blockedRows.map((r) => (
+                        <li key={r.adjustmentId}>
+                          <b>{r.studentLabel}</b> — {r.blocked}
+                        </li>
+                      ))}
+                    </ul>
+                  </Notice>
+                </div>
+              )}
+              <div className="hint" style={{ marginTop: 6 }}>
+                부서 기준금액은 바뀌지 않습니다. 금액을 되돌린 학생은 [부서정보]에서
+                ‘학생별 수정’으로 보일 수 있습니다.
+              </div>
+            </>
+          )}
+        </>
+      }
+      busy={busy}
+      disabled={!p || p.blocked}
+      onConfirm={onConfirm}
+      onClose={onClose}
+    />
   )
 }

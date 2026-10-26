@@ -8,6 +8,7 @@ import { invoke } from '@tauri-apps/api/core'
 import type { SortSpec } from '@/lib/sortSpec'
 
 import type {
+  RevertPreview,
   BatchResult,
   BillingBatch,
   DeltaRegister,
@@ -380,9 +381,14 @@ export const api = {
     invoke<BatchResult>('adjustment_batch_create', { workspaceId, departmentId, picks, register }),
   adjustmentBatches: (workspaceId: number) =>
     invoke<BillingBatch[]>('adjustment_batches', { workspaceId }),
-  /** 묶음을 한 번에 지운다. **금액은 되돌리지 않는다** */
+  /** 묶음을 한 번에 지운다. 딸린 기록마다 그 차액을 학생 금액에 되돌린다 */
   adjustmentBatchDelete: (batchId: number) =>
     invoke<number>('adjustment_batch_delete', { batchId }),
+  /** 지우면 금액이 어떻게 되는지 미리 본다. 아무것도 고치지 않는다 */
+  adjustmentDeletePreview: (ids: number[]) =>
+    invoke<RevertPreview>('adjustment_delete_preview', { ids }),
+  adjustmentBatchDeletePreview: (batchId: number) =>
+    invoke<RevertPreview>('adjustment_batch_delete_preview', { batchId }),
   adjustmentExport: (workspaceId: number, filter: AdjustmentFilter, cond: string) =>
     invoke<ExportResult>('adjustment_export', { workspaceId, filter, cond }),
 
