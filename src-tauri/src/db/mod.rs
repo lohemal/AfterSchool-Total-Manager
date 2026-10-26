@@ -107,3 +107,7 @@ fn setup_conn(conn: &Connection) -> AppResult<()> {
 #[cfg(test)]
 #[path = "class_no_migration_tests.rs"]
 mod class_no_migration_tests;
+
+#[cfg(test)]
+#[path = "adjustment_migration_tests.rs"]
+mod adjustment_migration_tests;

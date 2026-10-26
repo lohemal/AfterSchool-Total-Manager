@@ -8,6 +8,9 @@ import { invoke } from '@tauri-apps/api/core'
 import type { SortSpec } from '@/lib/sortSpec'
 
 import type {
+  BatchResult,
+  BillingBatch,
+  DeltaRegister,
   CustomFeeReport,
   TransferCheck,
   CapacityStats,
@@ -362,6 +365,24 @@ export const api = {
   adjustmentConfirm: (ids: number[], mode: 'KEEP' | 'APPLY') =>
     invoke<number>('adjustment_confirm', { ids, mode }),
   adjustmentDelete: (ids: number[]) => invoke<number>('adjustment_delete', { ids }),
+
+  // ── 차액 추가징수·환불 (v0.1.9)
+  /** 금액을 고치고, 원하면 차액을 추가징수·환불로 남긴다. 한 트랜잭션이다 */
+  enrollmentUpdateFeesDelta: (id: number, fees: Fee[], reason: string, register: DeltaRegister) =>
+    invoke<number[]>('enrollment_update_fees_delta', { id, fees, reason, register }),
+  /** 부서 일괄. 고른 칸을 기준금액으로 맞추고, 원하면 차액을 묶음으로 남긴다 */
+  adjustmentBatchCreate: (
+    workspaceId: number,
+    departmentId: number,
+    picks: FeePick[],
+    register: DeltaRegister,
+  ) =>
+    invoke<BatchResult>('adjustment_batch_create', { workspaceId, departmentId, picks, register }),
+  adjustmentBatches: (workspaceId: number) =>
+    invoke<BillingBatch[]>('adjustment_batches', { workspaceId }),
+  /** 묶음을 한 번에 지운다. **금액은 되돌리지 않는다** */
+  adjustmentBatchDelete: (batchId: number) =>
+    invoke<number>('adjustment_batch_delete', { batchId }),
   adjustmentExport: (workspaceId: number, filter: AdjustmentFilter, cond: string) =>
     invoke<ExportResult>('adjustment_export', { workspaceId, filter, cond }),
 

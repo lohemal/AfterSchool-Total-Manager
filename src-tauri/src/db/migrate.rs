@@ -81,6 +81,14 @@ const MIGRATIONS: &[Migration] = &[
         sql: include_str!("../../migrations/007_transfer_and_custom.sql"),
         fk_off: false,
     },
+    // 추가징수·환불 발생 유형 칸 · 부서 일괄 묶음 표. 기존 줄은 LEGACY 로
+    // 두고 고치지 않는다. 이 표들에는 자료판 트리거가 없어 정산이 그대로다.
+    Migration {
+        version: 8,
+        name: "008_adjustment_source",
+        sql: include_str!("../../migrations/008_adjustment_source.sql"),
+        fk_off: false,
+    },
 ];
 
 pub fn latest_version() -> i32 {

@@ -315,9 +315,18 @@ export function DepartmentsPage() {
         <DepartmentModal
           value={editing === 'new' ? null : editing}
           onClose={() => setEditing(null)}
-          onSaved={() => {
+          onSaved={(feesChanged) => {
+            const dept = editing === 'new' ? null : editing
             setEditing(null)
             void qc.invalidateQueries()
+            // 기준금액을 바꿨고, 그 때문에 수강중인 학생 금액과 차이가 생겼으면
+            // 바로 [이 부서 금액 반영]을 연다 (v0.1.9). 거기서 '금액만 반영'과
+            // '추가징수·환불 대상으로 등록'을 고른다. 차이가 없으면 열지 않는다.
+            if (feesChanged && dept && wsId !== null) {
+              void api.enrollmentFeeDiff(wsId, dept.id).then((d) => {
+                if (d.rows.length > 0) setApplyFor(dept)
+              })
+            }
           }}
         />
       )}
@@ -396,7 +405,8 @@ function DepartmentModal({
 }: {
   value: Department | null
   onClose: () => void
-  onSaved: () => void
+  /** `feesChanged` — 기존 부서의 기준금액이 바뀌었는가 */
+  onSaved: (feesChanged: boolean) => void
 }) {
   const app = useApp()
   const toast = useToast()
@@ -426,7 +436,13 @@ function DepartmentModal({
     },
     onSuccess: () => {
       toast.ok('저장되었습니다.')
-      onSaved()
+      // 기존 부서의 기준금액이 바뀌었는지 — 바뀌었으면 화면이 [금액 반영]을 이어 연다.
+      const feesChanged =
+        value !== null &&
+        form.fees.some(
+          (f) => (value.fees.find((v) => v.itemCode === f.itemCode)?.amount ?? 0) !== f.amount,
+        )
+      onSaved(feesChanged)
     },
     onError: (e) => toast.bad(errorMessage(e)),
   })

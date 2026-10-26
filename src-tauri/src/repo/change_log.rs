@@ -39,6 +39,11 @@ pub const DEPT_SESSION_EDIT: &str = "DEPT_SESSION_EDIT";
 pub const DEPT_SESSION_CLEAR: &str = "DEPT_SESSION_CLEAR";
 /// 맞춤형 차시당 단가 변경 (v0.1.8)
 pub const YEAR_RATE_EDIT: &str = "YEAR_RATE_EDIT";
+/// 학생 개별 추가징수·환불 등록 (v0.1.9)
+pub const ADJUST_ADD: &str = "ADJUST_ADD";
+/// 부서 일괄 추가징수·환불 등록·삭제 (v0.1.9)
+pub const ADJUST_BATCH_ADD: &str = "ADJUST_BATCH_ADD";
+pub const ADJUST_BATCH_DELETE: &str = "ADJUST_BATCH_DELETE";
 /// 새 작업공간을 만들며 기존 작업공간의 운영자료를 가져온 일 (v0.1.6)
 pub const WS_IMPORT: &str = "WS_IMPORT";
 
@@ -63,6 +68,9 @@ pub fn kind_label(kind: &str) -> &'static str {
         DEPT_SESSION_EDIT => "수업일 조정",
         DEPT_SESSION_CLEAR => "수업일 조정 해제",
         YEAR_RATE_EDIT => "맞춤형 차시당 단가 변경",
+        ADJUST_ADD => "추가징수·환불 등록",
+        ADJUST_BATCH_ADD => "부서 일괄 추가징수·환불",
+        ADJUST_BATCH_DELETE => "부서 일괄 조정 삭제",
         "ELIGIBILITY" => "지원자격 변경",
         "GRANT" => "지원금 변경",
         "POLICY" => "지원정책 변경",

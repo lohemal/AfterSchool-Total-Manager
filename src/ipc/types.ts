@@ -702,6 +702,52 @@ export interface Adjustment {
   total: number
   needsCheck: boolean
   createdAt: string
+  /** 발생 유형 (v0.1.9) */
+  source: AdjustmentSource
+  /** 부서 일괄로 함께 생긴 기록이면 그 묶음 */
+  batchId: number | null
+}
+
+/**
+ * 발생 유형.
+ *
+ * `LEGACY` 는 v0.1.9 이전의 기록이다 — '수강취소'라고 단정하지 않는다.
+ */
+export type AdjustmentSource = 'LEGACY' | 'ENROLL' | 'CANCEL' | 'DEPT_BATCH' | 'INDIVIDUAL'
+
+/** 부서 일괄 묶음 한 건. 합계는 딸린 기록을 더해 낸 값이다. */
+export interface BillingBatch {
+  id: number
+  departmentId: number
+  deptLabel: string
+  occurredOn: string
+  note: string
+  createdAt: string
+  count: number
+  students: number
+  refundTotal: number
+  additionalTotal: number
+}
+
+/**
+ * 차액을 기록할지.
+ *
+ * `register = false` 면 **금액만 고친다**(잘못 넣은 값을 바로잡는 일). 방향은
+ * 사람이 고르지 않는다 — 줄었으면 환불, 늘었으면 추가징수다.
+ */
+export interface DeltaRegister {
+  register: boolean
+  occurredOn: string | null
+  note: string | null
+}
+
+export interface BatchResult {
+  changed: number
+  batchId: number | null
+  refunds: number
+  additionals: number
+  refundTotal: number
+  additionalTotal: number
 }
 
 export interface AdjustmentReport {
@@ -729,6 +775,8 @@ export interface AdjustmentFilter {
   /** 부서는 **학생을 찾는 조건**이다 */
   departmentId?: number | null
   query?: string | null
+  /** 발생 유형 (v0.1.9). 비우면 모두 */
+  source?: AdjustmentSource | null
 }
 
 /** 추가징수·환불을 만들 때 함께 보내는 것. 보내지 않으면 기록을 만들지 않는다. */

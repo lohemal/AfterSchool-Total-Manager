@@ -103,6 +103,9 @@ fn detail_sheet<'a>(name: &'a str, view: &AdjustmentView, items: &[CostItem]) ->
     headers.push("합계".to_string());
     headers.push("발생일".to_string());
     headers.push("사유".to_string());
+    // v0.1.9 — 맨 끝에 붙인다. 앞 칸의 자리를 옮기지 않아야 이 양식을 쓰던
+    // 담당자의 수식·서식이 깨지지 않는다.
+    headers.push("발생 유형".to_string());
 
     let money_from = 6;
     let money: Vec<usize> = (money_from..money_from + items.len() + 1).collect();
@@ -134,12 +137,17 @@ fn detail_sheet<'a>(name: &'a str, view: &AdjustmentView, items: &[CostItem]) ->
             row.push(a.total.to_string());
             row.push(a.occurred_on.clone());
             row.push(a.note.clone());
+            row.push(crate::repo::adjustment::source_label(&a.source).to_string());
             rows.push(row);
         }
     }
 
-    let last = headers.len() - 1;
-    let widths = width_plan(&[(4, W_NAME), (5, W_DEPT), (last - 1, W_DATE), (last, W_NOTE)], headers.len());
+    // 사유·발생일 자리는 예전 그대로다. 새 칸(발생 유형)만 맨 끝에 있다.
+    let note_col = headers.len() - 2;
+    let widths = width_plan(
+        &[(4, W_NAME), (5, W_DEPT), (note_col - 1, W_DATE), (note_col, W_NOTE), (note_col + 1, W_DATE)],
+        headers.len(),
+    );
     write::SheetSpec {
         name,
         headers,

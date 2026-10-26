@@ -92,3 +92,6 @@ mod transfer_tests;
 
 #[cfg(test)]
 mod custom_fee_tests;
+
+#[cfg(test)]
+mod delta_tests;

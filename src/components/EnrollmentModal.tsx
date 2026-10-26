@@ -11,10 +11,12 @@ import { useEffect, useState } from 'react'
 
 import { api, errorMessage } from '@/ipc/api'
 import type { Department, Enrollment, Fee } from '@/ipc/types'
+import { deltaOf } from '@/lib/delta'
 import { won } from '@/lib/format'
 import { useApp } from '@/lib/useApp'
 
 import { AdjustmentToggle, adjustmentOf, todayISO } from './AdjustmentToggle'
+import { DeltaChoice, deltaChoiceReady, type DeltaChoiceValue } from './DeltaChoice'
 
 import { Modal } from './Modal'
 import { StudentPicker } from './StudentPicker'
@@ -78,10 +80,36 @@ export function EnrollmentModal({
   const baseTotal = (base.data ?? []).reduce((s, f) => s + f.amount, 0)
   const differs = departmentId !== null && base.data !== undefined && total !== baseTotal
 
+  // 차액 추가징수·환불 (v0.1.9). 수강중인 건의 금액을 고칠 때만 묻는다 —
+  // 취소한 건은 이미 '취소 환불' 기록이 있어, 거기 차액을 또 적으면 두 번 셈된다.
+  const [delta, setDelta] = useState<DeltaChoiceValue>({
+    register: false,
+    occurredOn: todayISO(),
+    note: '',
+  })
+  const ds = value
+    ? deltaOf(
+        value.fees,
+        fees,
+        items.map((it) => it.code),
+      )
+    : null
+  const canRegister = value?.status === 'ACTIVE' && (ds?.changed ?? false)
+
   const save = useMutation({
     mutationFn: async () => {
       if (value) {
-        await api.enrollmentUpdateFees(value.id, fees, reason)
+        if (canRegister && delta.register) {
+          // 금액 수정과 기록이 한 트랜잭션이다 — 둘 중 하나만 남지 않는다.
+          await api.enrollmentUpdateFeesDelta(value.id, fees, reason, {
+            register: true,
+            occurredOn: delta.occurredOn || null,
+            note: delta.note,
+          })
+        } else {
+          // '금액만 수정' 은 v0.1.8 까지와 똑같은 길이다.
+          await api.enrollmentUpdateFees(value.id, fees, reason)
+        }
         return
       }
       if (!studentId) throw { code: 'INVALID', message: '학생을 골라 주세요.' }
@@ -95,7 +123,9 @@ export function EnrollmentModal({
     onSuccess: () => {
       toast.ok(
         value
-          ? '금액을 저장했습니다.'
+          ? canRegister && delta.register
+            ? '금액을 고치고 차액을 추가징수·환불 대상으로 등록했습니다.'
+            : '금액을 저장했습니다.'
           : addCharge
             ? '수강을 등록하고 추가징수 대상으로 넣었습니다.'
             : '수강을 등록했습니다.',
@@ -129,7 +159,13 @@ export function EnrollmentModal({
       footer={
         <>
           <Button onClick={onClose}>취소</Button>
-          <Button variant="primary" onClick={() => save.mutate()} disabled={save.isPending}>
+          {/* 저장 중에는 잠근다 — 연달아 눌러도 요청이 한 번만 간다. 서버도 지금
+              값을 기준으로 차액을 셈하므로 두 번 가도 기록이 겹치지 않는다. */}
+          <Button
+            variant="primary"
+            onClick={() => save.mutate()}
+            disabled={save.isPending || (canRegister && !deltaChoiceReady(delta))}
+          >
             {save.isPending ? '저장 중…' : '저장'}
           </Button>
         </>
@@ -221,6 +257,22 @@ export function EnrollmentModal({
             부서 기준금액({won(baseTotal)}원)과 다릅니다. 이 학생에게만 적용되며 부서정보는
             바뀌지 않습니다.
           </Notice>
+        </div>
+      )}
+
+      {canRegister && ds && (
+        <DeltaChoice
+          value={delta}
+          onChange={setDelta}
+          refund={ds.refund}
+          additional={ds.additional}
+        />
+      )}
+      {value && value.status !== 'ACTIVE' && ds?.changed && (
+        <div className="hint" style={{ marginTop: 10 }}>
+          취소한 수강 건의 금액을 고치면, 이미 있는 <b>취소 환불</b> 기록이 [추가·취소 관리]에서
+          ‘확인 필요’로 뜹니다. 환불액은 거기서 정리해 주세요 — 여기서 따로 등록하면 같은 돈이 두
+          번 셈됩니다.
         </div>
       )}
 

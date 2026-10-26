@@ -332,3 +332,53 @@ pub fn enrollment_filter_options(
 ) -> AppResult<crate::model::EnrollmentFilterOptions> {
     db.read(|c| repo::enrollment::filter_options(c, workspace_id))
 }
+
+// ─────────────────────────────────────────────── 차액 추가징수·환불 (v0.1.9)
+
+/// 학생 한 명의 금액을 고치고, 원하면 차액을 추가징수·환불로 남긴다.
+///
+/// 금액 수정과 기록이 **한 트랜잭션**이다. 둘 중 하나만 남지 않는다.
+#[tauri::command]
+pub fn enrollment_update_fees_delta(
+    db: State<'_, Db>,
+    id: i64,
+    fees: Vec<Fee>,
+    reason: String,
+    register: crate::model::DeltaRegister,
+) -> AppResult<Vec<i64>> {
+    db.write(|c| {
+        let items = repo::cost_items(c)?;
+        repo::adjustment::update_fees_with_delta(c, id, &fees, &reason, &register, &items)
+    })
+}
+
+/// 부서 일괄. 고른 칸을 부서 기준금액으로 맞추고, 원하면 차액을 묶음으로 남긴다.
+///
+/// 전부 한 트랜잭션이다 — 18명 중 하나에서 실패하면 아무것도 남지 않는다.
+#[tauri::command]
+pub fn adjustment_batch_create(
+    db: State<'_, Db>,
+    workspace_id: i64,
+    department_id: i64,
+    picks: Vec<FeePick>,
+    register: crate::model::DeltaRegister,
+) -> AppResult<crate::model::BatchResult> {
+    db.write(|c| {
+        let items = repo::cost_items(c)?;
+        repo::adjustment::create_batch(c, workspace_id, department_id, &picks, &register, &items)
+    })
+}
+
+#[tauri::command]
+pub fn adjustment_batches(
+    db: State<'_, Db>,
+    workspace_id: i64,
+) -> AppResult<Vec<crate::model::BillingBatch>> {
+    db.read(|c| repo::adjustment::batches(c, workspace_id))
+}
+
+/// 묶음을 한 번에 지운다. **금액은 되돌리지 않는다** — 기록만 지운다.
+#[tauri::command]
+pub fn adjustment_batch_delete(db: State<'_, Db>, batch_id: i64) -> AppResult<usize> {
+    db.write(|c| repo::adjustment::delete_batch(c, batch_id))
+}

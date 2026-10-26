@@ -27,8 +27,11 @@ import type {
   AdjustmentDiff,
   AdjustmentFilter,
   AdjustmentReport,
+  AdjustmentSource,
+  BillingBatch,
   StudentSumRow,
 } from '@/ipc/types'
+import { SOURCE_TEXT } from '@/lib/delta'
 import { compareClassNo, studentLabel, won } from '@/lib/format'
 import { saveExport } from '@/lib/saveFile'
 import { useApp } from '@/lib/useApp'
@@ -67,10 +70,13 @@ export function AdjustmentPage() {
   const [classNo, setClassNo] = useState('')
   const [departmentId, setDepartmentId] = useState('')
   const [query, setQuery] = useState('')
+  // 발생 유형 (v0.1.9) — 취소에서 온 것, 부서 일괄, 개별 조정을 한 명단에서 가려 본다.
+  const [source, setSource] = useState<AdjustmentSource | ''>('')
 
   const [detail, setDetail] = useState<StudentSumRow | null>(null)
   const [showDiffs, setShowDiffs] = useState(false)
   const [removing, setRemoving] = useState<Adjustment | null>(null)
+  const [showBatches, setShowBatches] = useState(false)
 
   const filter: AdjustmentFilter = useMemo(
     () => ({
@@ -80,8 +86,9 @@ export function AdjustmentPage() {
       classNo: classNo || null,
       departmentId: departmentId ? Number(departmentId) : null,
       query: query.trim() || null,
+      source: source || null,
     }),
-    [from, to, grade, classNo, departmentId, query],
+    [from, to, grade, classNo, departmentId, query, source],
   )
 
   const view = useQuery({
@@ -152,6 +159,7 @@ export function AdjustmentPage() {
     setClassNo('')
     setDepartmentId('')
     setQuery('')
+    setSource('')
   }
 
   if (wsId === null) {
@@ -220,6 +228,9 @@ export function AdjustmentPage() {
           </p>
         </div>
         <div className="page__actions">
+          <Button onClick={() => setShowBatches(true)} title="부서 일괄로 등록한 묶음을 보고 통째로 지웁니다">
+            일괄 조정
+          </Button>
           <Button
             variant="primary"
             onClick={() => download.mutate()}
@@ -338,6 +349,20 @@ export function AdjustmentPage() {
           <Field label="학생 이름">
             <Search value={query} onValue={setQuery} placeholder="이름 일부" />
           </Field>
+          <Field label="발생 유형">
+            <Select
+              value={source}
+              onChange={(e) => setSource(e.target.value as AdjustmentSource | '')}
+              style={{ width: 120 }}
+            >
+              <option value="">전체</option>
+              <option value="CANCEL">수강취소</option>
+              <option value="ENROLL">중도추가</option>
+              <option value="DEPT_BATCH">부서일괄</option>
+              <option value="INDIVIDUAL">개별조정</option>
+              <option value="LEGACY">기존 기록</option>
+            </Select>
+          </Field>
           <Button onClick={reset}>초기화</Button>
           <Button
             small
@@ -409,6 +434,14 @@ export function AdjustmentPage() {
         />
       )}
 
+      {showBatches && (
+        <BatchModal
+          workspaceId={wsId}
+          onClose={() => setShowBatches(false)}
+          onDone={() => void qc.invalidateQueries()}
+        />
+      )}
+
       {removing && (
         <Confirm
           danger
@@ -471,6 +504,7 @@ function DetailModal({
                 합계
               </th>
               <th style={{ width: 104 }}>발생일</th>
+              <th style={{ width: 84 }}>발생 유형</th>
               <th className="left" style={{ width: 150 }}>
                 사유 · 메모
               </th>
@@ -497,8 +531,14 @@ function DetailModal({
                   <b>{won(a.total)}</b>
                 </td>
                 <td>{a.occurredOn}</td>
+                <td>
+                  <span className="tag tag--plain">{SOURCE_TEXT[a.source] ?? a.source}</span>
+                </td>
                 <td className="left">{a.note || <span className="muted">—</span>}</td>
                 <td>
+                  {/* 부서 일괄 기록도 한 건씩 지울 수 있다 — 18명 가운데 1명만 잘못된
+                      경우가 있다. 남은 기록은 묶음 번호를 그대로 지녀, 왜 함께
+                      생겼는지는 [일괄 조정]에서 계속 보인다. 통째로 지우려면 거기서 한다. */}
                   <Button small variant="danger" onClick={() => onRemove(a)}>
                     삭제
                   </Button>
@@ -760,5 +800,119 @@ function DiffModal({
         </>
       )}
     </Modal>
+  )
+}
+
+/**
+ * 부서 일괄 묶음 (v0.1.9).
+ *
+ * '이 18건이 왜 한꺼번에 생겼는가'를 보여 주고, 잘못 등록한 묶음을 학생마다
+ * 찾아가지 않고 **한 번에** 지운다.
+ *
+ * 지우는 것은 **기록**이다. 바뀐 금액은 되돌리지 않는다 — 기존 기록 삭제도 늘
+ * 그랬다. 금액까지 되돌리려면 부서 기준금액을 고쳐 [부서금액 반영]을 다시 한다.
+ */
+function BatchModal({
+  workspaceId,
+  onClose,
+  onDone,
+}: {
+  workspaceId: number
+  onClose: () => void
+  onDone: () => void
+}) {
+  const toast = useToast()
+  const [removing, setRemoving] = useState<BillingBatch | null>(null)
+
+  const list = useQuery({
+    queryKey: ['adjustment-batches', workspaceId],
+    queryFn: () => api.adjustmentBatches(workspaceId),
+  })
+
+  const remove = useMutation({
+    mutationFn: (id: number) => api.adjustmentBatchDelete(id),
+    onSuccess: (n) => {
+      toast.ok(`일괄 조정 ${n}건을 지웠습니다. 바뀐 금액은 그대로입니다.`)
+      setRemoving(null)
+      void list.refetch()
+      onDone()
+    },
+    onError: (e) => toast.bad(errorMessage(e)),
+  })
+
+  const rows = list.data ?? []
+
+  return (
+    <>
+      <Modal wide title="부서 일괄 조정" onClose={onClose} footer={<Button onClick={onClose}>닫기</Button>}>
+        {list.isLoading && <div className="hint">불러오는 중…</div>}
+        {rows.length === 0 && !list.isLoading && (
+          <Empty title="부서 일괄 조정이 없습니다">
+            [부서정보]에서 부서금액을 반영할 때 ‘추가징수·환불 대상으로 등록’을 고르면 여기에
+            묶음으로 남습니다.
+          </Empty>
+        )}
+        {rows.length > 0 && (
+          <table className="table">
+            <thead>
+              <tr>
+                <th style={{ width: 104 }}>발생일</th>
+                <th>부서</th>
+                <th className="left">사유</th>
+                <th className="num">학생</th>
+                <th className="num">환불</th>
+                <th className="num">추가징수</th>
+                <th style={{ width: 92 }} />
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((b) => (
+                <tr key={b.id}>
+                  <td>{b.occurredOn}</td>
+                  <td>{b.deptLabel}</td>
+                  <td className="left">{b.note}</td>
+                  <td className="num">{b.students}명</td>
+                  <td className="num">{b.refundTotal > 0 ? `${won(b.refundTotal)}원` : '—'}</td>
+                  <td className="num">
+                    {b.additionalTotal > 0 ? `${won(b.additionalTotal)}원` : '—'}
+                  </td>
+                  <td>
+                    <Button small variant="danger" onClick={() => setRemoving(b)}>
+                      묶음 삭제
+                    </Button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+        <div className="hint" style={{ marginTop: 8 }}>
+          합계는 묶음에 딸린 기록을 더한 값입니다. 한 건씩 지운 기록은 여기서도 빠집니다.
+        </div>
+      </Modal>
+
+      {removing && (
+        <Confirm
+          danger
+          title="일괄 조정 삭제"
+          confirmText="묶음 삭제"
+          message={
+            <>
+              <b>
+                {removing.deptLabel} · {removing.occurredOn}
+              </b>{' '}
+              ({removing.note})의 기록 <b>{removing.count}건</b>을 한 번에 지웁니다.
+              <div style={{ marginTop: 8 }}>
+                <b>바뀐 금액은 되돌리지 않습니다.</b> 추가징수·환불 기록만 지웁니다. 금액까지
+                되돌리려면 부서 기준금액을 고쳐 [부서금액 반영]을 다시 해 주세요.
+              </div>
+            </>
+          }
+          busy={remove.isPending}
+          onConfirm={() => remove.mutate(removing.id)}
+          onClose={() => setRemoving(null)}
+        />
+      )}
+    </>
   )
 }

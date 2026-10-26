@@ -796,6 +796,56 @@ pub struct Adjustment {
     /// 원본 금액이 달라져 사람이 확인해야 하는가
     pub needs_check: bool,
     pub created_at: String,
+    /// 발생 유형: `LEGACY` · `ENROLL` · `CANCEL` · `DEPT_BATCH` · `INDIVIDUAL` (v0.1.9)
+    pub source: String,
+    /// 부서 일괄로 함께 생긴 기록이면 그 묶음
+    pub batch_id: Option<i64>,
+}
+
+/// 부서 일괄 추가징수·환불 묶음 한 건 (v0.1.9).
+///
+/// 합계는 저장하지 않고 딸린 기록을 더해 낸다.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BillingBatch {
+    pub id: i64,
+    pub department_id: i64,
+    pub dept_label: String,
+    pub occurred_on: String,
+    pub note: String,
+    pub created_at: String,
+    /// 딸린 기록 수
+    pub count: i64,
+    /// 딸린 학생 수 (한 학생에게 환불·추가징수가 함께 생기면 기록은 둘)
+    pub students: i64,
+    pub refund_total: i64,
+    pub additional_total: i64,
+}
+
+/// 부서 일괄 · 학생 개별 차액을 기록할지 (v0.1.9).
+///
+/// `register = false` 면 **금액만 고친다** — 잘못 넣은 값을 바로잡는 일이라 돈이
+/// 오가지 않는다. `true` 면 고친 차액을 추가징수·환불 기록으로 남긴다. 어느
+/// 방향인지는 사람이 고르지 않는다 — 금액이 줄었으면 환불, 늘었으면 추가징수다.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeltaRegister {
+    pub register: bool,
+    pub occurred_on: Option<String>,
+    pub note: Option<String>,
+}
+
+/// 부서 일괄 결과.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BatchResult {
+    /// 금액을 바꾼 칸 수
+    pub changed: i64,
+    pub batch_id: Option<i64>,
+    pub refunds: i64,
+    pub additionals: i64,
+    pub refund_total: i64,
+    pub additional_total: i64,
 }
 
 /// 추가·취소 관리 한 탭의 결과 — 학생별 합계 + 부서별 상세.
@@ -841,6 +891,8 @@ pub struct AdjustmentFilter {
     /// 부서는 **학생을 찾는 조건**이다 (학생별 징수 내역과 같은 원칙)
     pub department_id: Option<i64>,
     pub query: Option<String>,
+    /// 발생 유형 필터 (v0.1.9). 비우면 모두.
+    pub source: Option<String>,
 }
 
 /// 추가징수·환불을 만들 때 함께 받는 것.

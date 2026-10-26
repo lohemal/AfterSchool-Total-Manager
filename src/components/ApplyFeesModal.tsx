@@ -19,6 +19,8 @@ import type { ApplyMode, Department, FeeDiff } from '@/ipc/types'
 import { won } from '@/lib/format'
 import { useApp } from '@/lib/useApp'
 
+import { todayISO } from './AdjustmentToggle'
+import { DeltaChoice, deltaChoiceReady, type DeltaChoiceValue } from './DeltaChoice'
 import { Modal } from './Modal'
 import { useToast } from './Toast'
 import { Button, Empty, Field, Input, Notice } from './ui'
@@ -76,9 +78,35 @@ export function ApplyFeesModal({
     return picked.includes(key(d))
   })
 
+  // 차액 추가징수·환불 (v0.1.9). **한 부서**를 고른 때만 묻는다 — 묶음은 부서
+  // 하나에 딸린다. 반영하면 그 칸은 기준금액이 되므로 차액은 `기준 - 지금` 이다.
+  const [delta, setDelta] = useState<DeltaChoiceValue>({
+    register: false,
+    occurredOn: todayISO(),
+    note: '',
+  })
+  const canBatch = department !== null
+  const refund = targets.filter((d) => d.base < d.current).reduce((s, d) => s + d.current - d.base, 0)
+  const additional = targets
+    .filter((d) => d.base > d.current)
+    .reduce((s, d) => s + d.base - d.current, 0)
+  const students = new Set(targets.map((d) => d.enrollmentId)).size
+  const registering = canBatch && delta.register
+
   const apply = useMutation({
-    mutationFn: () =>
-      api.enrollmentApplyFees({
+    mutationFn: async () => {
+      if (registering) {
+        // 금액 반영과 차액 기록이 한 트랜잭션이다. 고른 칸을 그대로 넘긴다 —
+        // 서버가 지금 실제로 차이가 있는 칸(수강중)만 다시 골라 쓴다.
+        const r = await api.adjustmentBatchCreate(
+          app.workspaceId!,
+          department!.id,
+          targets.map((d) => ({ enrollmentId: d.enrollmentId, itemCode: d.itemCode })),
+          { register: true, occurredOn: delta.occurredOn || null, note: delta.note },
+        )
+        return { kind: 'batch' as const, r }
+      }
+      const r = await api.enrollmentApplyFees({
         workspaceId: app.workspaceId!,
         departmentId: department?.id ?? null,
         mode,
@@ -89,12 +117,25 @@ export function ApplyFeesModal({
                 .map((d) => ({ enrollmentId: d.enrollmentId, itemCode: d.itemCode }))
             : [],
         reason,
-      }),
-    onSuccess: (r) => {
-      toast.ok(
-        `${r.enrollments}건의 수강에서 ${r.changed}개 항목을 반영했습니다.` +
-          (r.kept > 0 ? ` 학생별 수정 ${r.kept}개는 그대로 두었습니다.` : ''),
-      )
+      })
+      return { kind: 'apply' as const, r }
+    },
+    onSuccess: (out) => {
+      if (out.kind === 'batch') {
+        const r = out.r
+        const parts: string[] = []
+        if (r.refunds > 0) parts.push(`환불 ${r.refunds}건 ${won(r.refundTotal)}원`)
+        if (r.additionals > 0) parts.push(`추가징수 ${r.additionals}건 ${won(r.additionalTotal)}원`)
+        toast.ok(
+          `${r.changed}개 항목을 반영하고 ${parts.join(' · ') || '차액'}을 한 묶음으로 등록했습니다.`,
+        )
+      } else {
+        const r = out.r
+        toast.ok(
+          `${r.enrollments}건의 수강에서 ${r.changed}개 항목을 반영했습니다.` +
+            (r.kept > 0 ? ` 학생별 수정 ${r.kept}개는 그대로 두었습니다.` : ''),
+        )
+      }
       onApplied()
     },
     onError: (e) => toast.bad(errorMessage(e)),
@@ -117,12 +158,22 @@ export function ApplyFeesModal({
               : '바뀌는 항목이 없습니다.'}
           </span>
           <Button onClick={onClose}>취소</Button>
+          {/* 반영 중에는 잠근다. 서버도 지금 값을 기준으로 다시 셈하므로, 같은
+              요청이 두 번 가도 두 번째에는 고칠 칸이 없어 묶음이 하나만 생긴다. */}
           <Button
             variant="primary"
             onClick={() => apply.mutate()}
-            disabled={apply.isPending || targets.length === 0}
+            disabled={
+              apply.isPending ||
+              targets.length === 0 ||
+              (registering && !deltaChoiceReady(delta))
+            }
           >
-            {apply.isPending ? '반영 중…' : `${targets.length}개 반영`}
+            {apply.isPending
+              ? '반영 중…'
+              : registering
+                ? `${students}명 반영하고 등록`
+                : `${targets.length}개 반영`}
           </Button>
         </>
       }
@@ -201,6 +252,9 @@ export function ApplyFeesModal({
                   <th className="num" style={{ width: 92 }}>
                     기준금액
                   </th>
+                  <th className="num" style={{ width: 92 }}>
+                    차액
+                  </th>
                   <th style={{ width: 80 }}>구분</th>
                 </tr>
               </thead>
@@ -240,6 +294,11 @@ export function ApplyFeesModal({
                           {won(d.base)}
                         </b>
                       </td>
+                      {/* 반영하면 이 칸은 기준금액이 된다. 줄면 환불, 늘면 추가징수. */}
+                      <td className="num">
+                        {d.base - d.current > 0 ? '+' : ''}
+                        {won(d.base - d.current)}
+                      </td>
                       <td>
                         {d.isOverridden ? (
                           <span className="tag tag--warn">학생별 수정</span>
@@ -254,15 +313,41 @@ export function ApplyFeesModal({
             </table>
           </div>
 
-          <div style={{ marginTop: 12 }}>
-            <Field label="변경사유" hint="바뀐 수강마다 변경이력에 남습니다.">
-              <Input
-                value={reason}
-                placeholder="5월 단가 조정 등"
-                onChange={(e) => setReason(e.target.value)}
+          {canBatch && targets.length > 0 && (
+            <>
+              <div className="hint" style={{ marginTop: 10 }}>
+                반영 대상 <b>{students}명</b> · 수강중인 학생만입니다. 취소한 학생은 들어가지
+                않습니다.
+                {!registering && ' 추가징수·환불로 등록하면 학생별로 뺄 수 있습니다.'}
+              </div>
+              <DeltaChoice
+                value={delta}
+                onChange={(v) => {
+                  // 등록으로 바꾸면 지금 대상을 모두 골라 둔 채 '골라서 반영'으로 옮긴다.
+                  // 그러면 사람이 뺄 학생만 체크를 풀면 된다.
+                  if (v.register && !delta.register) {
+                    setPicked(targets.map(key))
+                    setMode('SELECTED')
+                  }
+                  setDelta(v)
+                }}
+                refund={refund}
+                additional={additional}
               />
-            </Field>
-          </div>
+            </>
+          )}
+
+          {!registering && (
+            <div style={{ marginTop: 12 }}>
+              <Field label="변경사유" hint="바뀐 수강마다 변경이력에 남습니다.">
+                <Input
+                  value={reason}
+                  placeholder="5월 단가 조정 등"
+                  onChange={(e) => setReason(e.target.value)}
+                />
+              </Field>
+            </div>
+          )}
         </>
       )}
     </Modal>
