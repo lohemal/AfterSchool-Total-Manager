@@ -221,3 +221,17 @@ pub fn settlement_export(
         }
     })
 }
+
+/// 정산 상세내역 Excel — 학생 × 부서 × 항목 × 재원 (v0.1.10).
+///
+/// 기존 Excel 과 같은 종류 이름을 받고, 같은 규칙(최신 유효 정산일 때만)으로 만든다.
+#[tauri::command]
+pub fn settlement_detail_export(
+    db: State<'_, Db>,
+    workspace_id: i64,
+    kind: String,
+) -> AppResult<ExportResult> {
+    let kind = repo::settle_detail::DetailKind::from_code(&kind)?;
+    let dir = db.export_dir();
+    db.read(|c| excel::settle_detail::export(c, workspace_id, kind, &dir))
+}

@@ -15,6 +15,7 @@ pub mod adjustment;
 pub mod admin;
 pub mod dept_fees;
 pub mod read;
+pub mod settle_detail;
 pub mod write;
 
 use std::collections::{HashMap, HashSet};

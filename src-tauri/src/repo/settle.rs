@@ -922,7 +922,7 @@ fn load_program_order(conn: &Connection) -> AppResult<Vec<Program>> {
 
 // ─────────────────────────────────────────────── 조회
 
-fn latest_id(conn: &Connection, workspace_id: i64) -> AppResult<Option<(i64, String)>> {
+pub(crate) fn latest_id(conn: &Connection, workspace_id: i64) -> AppResult<Option<(i64, String)>> {
     Ok(conn
         .query_row(
             "SELECT id, created_at FROM settlement WHERE workspace_id = ?1 AND is_latest = 1",

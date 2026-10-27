@@ -163,6 +163,7 @@ pub fn run() {
             commands::settle::proposal_export,
             commands::settle::settlement_student_allocs,
             commands::settle::settlement_export,
+            commands::settle::settlement_detail_export,
             commands::excel::excel_template,
             commands::excel::excel_preview,
             commands::excel::excel_commit,

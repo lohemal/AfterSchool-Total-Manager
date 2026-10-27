@@ -5,6 +5,9 @@
  * 빠지는 일이 없어야 하기 때문이다.
  *
  * 최신 유효 정산이 아니면 버튼이 잠긴다 — 낡은 금액이 파일이 되면 되돌릴 수 없다.
+ *
+ * `detail` 이면 [상세내역 받기] (v0.1.10) — 학생 × 부서 한 줄에 항목별 금액을
+ * 펼친 파일이다. 잠기는 규칙은 같다.
  */
 
 import { useMutation } from '@tanstack/react-query'
@@ -20,17 +23,27 @@ export function ExportButton({
   kind,
   workspaceId,
   fresh,
+  detail,
 }: {
   kind: SettleExportKind
   workspaceId: number
   /** 최신 유효 정산인가 */
   fresh: boolean
+  /** 학생 × 부서 상세내역 */
+  detail?: boolean
 }) {
   const toast = useToast()
 
   const run = useMutation({
     mutationFn: () =>
-      saveExport(() => api.settlementExport(workspaceId, kind), toast, (r) => `${r.rows}건`),
+      saveExport(
+        () =>
+          detail
+            ? api.settlementDetailExport(workspaceId, kind)
+            : api.settlementExport(workspaceId, kind),
+        toast,
+        (r) => `${r.rows}${detail ? '줄' : '건'}`,
+      ),
   })
 
   return (
@@ -40,11 +53,13 @@ export function ExportButton({
       disabled={!fresh || run.isPending}
       title={
         fresh
-          ? '이 작업공간의 전체 정산 결과를 내려받습니다 (화면 검색과 무관)'
+          ? detail
+            ? '학생 × 부서 한 줄씩 항목별 금액을 펼쳐 내려받습니다 (화면 검색과 무관)'
+            : '이 작업공간의 전체 정산 결과를 내려받습니다 (화면 검색과 무관)'
           : '최신 유효 정산일 때만 내려받을 수 있습니다'
       }
     >
-      {run.isPending ? '만드는 중…' : 'Excel 다운로드'}
+      {run.isPending ? '만드는 중…' : detail ? '상세내역 받기' : 'Excel 다운로드'}
     </Button>
   )
 }

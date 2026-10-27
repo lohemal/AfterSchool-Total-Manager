@@ -16,6 +16,7 @@ pub mod proposal;
 pub mod priority;
 pub mod setting;
 pub mod settle;
+pub mod settle_detail;
 pub mod student;
 pub mod workspace_copy;
 pub mod year;
@@ -98,3 +99,6 @@ mod delta_tests;
 
 #[cfg(test)]
 mod revert_tests;
+
+#[cfg(test)]
+mod settle_detail_tests;

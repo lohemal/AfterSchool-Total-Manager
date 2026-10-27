@@ -323,6 +323,9 @@ export const api = {
   /** 최신 유효 정산일 때만 만들어진다. */
   settlementExport: (workspaceId: number, kind: SettleExportKind) =>
     invoke<ExportResult>('settlement_export', { workspaceId, kind }),
+  /** 학생 × 부서 × 항목 × 재원 상세 (v0.1.10). 같은 규칙 — 최신 유효 정산일 때만. */
+  settlementDetailExport: (workspaceId: number, kind: SettleExportKind) =>
+    invoke<ExportResult>('settlement_detail_export', { workspaceId, kind }),
 
   // Excel
   excelTemplate: (kind: ImportKind) => invoke<ExportResult>('excel_template', { kind }),

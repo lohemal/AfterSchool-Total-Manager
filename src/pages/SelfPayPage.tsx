@@ -186,6 +186,12 @@ export function SelfPayPage() {
         </div>
         <div className="page__actions">
           <ExportButton kind="self_pay" workspaceId={wsId} fresh={status.data?.state === 'FRESH'} />
+          <ExportButton
+            detail
+            kind="self_pay"
+            workspaceId={wsId}
+            fresh={status.data?.state === 'FRESH'}
+          />
         </div>
       </div>
 

@@ -210,6 +210,12 @@ function ProgramResult({
             workspaceId={wsId}
             fresh={status.data?.state === 'FRESH'}
           />
+          <ExportButton
+            detail
+            kind={exportKind}
+            workspaceId={wsId}
+            fresh={status.data?.state === 'FRESH'}
+          />
         </div>
       </div>
 
