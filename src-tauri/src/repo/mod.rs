@@ -8,6 +8,7 @@ pub mod capacity;
 pub mod change_log;
 pub mod custom_fee;
 pub mod department;
+pub mod dream;
 pub mod eligibility;
 pub mod fee_report;
 pub mod enrollment;

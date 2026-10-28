@@ -89,6 +89,14 @@ const MIGRATIONS: &[Migration] = &[
         sql: include_str!("../../migrations/008_adjustment_source.sql"),
         fk_off: false,
     },
+    // 방과후드림 결제관리 기반 — 새 표만 만든다. 기존 표 · 자료판 트리거를
+    // 건드리지 않으므로 이미 만든 정산이 낡음이 되지 않는다.
+    Migration {
+        version: 9,
+        name: "009_dream_payment",
+        sql: include_str!("../../migrations/009_dream_payment.sql"),
+        fk_off: false,
+    },
 ];
 
 pub fn latest_version() -> i32 {

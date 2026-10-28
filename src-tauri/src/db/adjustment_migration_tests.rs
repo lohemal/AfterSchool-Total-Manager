@@ -146,7 +146,7 @@ fn 다시_열어도_008_이_다시_돌지_않는다() {
     drop(Db::open(&path).unwrap());
     let db = Db::open(&path).unwrap();
     db.read(|c| {
-        assert_eq!(migrate::current_version(c)?, 8);
+        assert_eq!(migrate::current_version(c)?, migrate::latest_version());
         let n: i64 = c.query_row("SELECT COUNT(*) FROM billing_adjustment", [], |r| r.get(0))?;
         assert_eq!(n, 2);
         Ok(())

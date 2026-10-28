@@ -27,6 +27,15 @@ log = { version = "0.4", features = ["std"] }
 calamine = "0.26"
 rust_xlsxwriter = "0.79"
 uuid = { version = "1", features = ["v4"] }
+# 방과후드림 결제관리 — 개인참조번호·생년월일 암호화. 판은 경력증명서 앱에서 검증한 것과 같다.
+aes-gcm = "0.10"
+hmac = "0.12"
+sha2 = "0.10"
+zeroize = "1"
+
+# DPAPI — tauri(tao)가 이미 쓰는 windows 0.61 판에 기능만 더한다.
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.61", features = ["Win32_Security_Cryptography", "Win32_Foundation"] }
 
 [profile.release]
 codegen-units = 1

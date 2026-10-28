@@ -10,6 +10,7 @@
 //! 그래야 프로그램을 업데이트해도 자료가 남는다.
 
 pub mod commands;
+pub mod crypto;
 pub mod db;
 pub mod domain;
 pub mod error;

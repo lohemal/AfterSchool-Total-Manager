@@ -111,3 +111,7 @@ mod class_no_migration_tests;
 #[cfg(test)]
 #[path = "adjustment_migration_tests.rs"]
 mod adjustment_migration_tests;
+
+#[cfg(test)]
+#[path = "dream_migration_tests.rs"]
+mod dream_migration_tests;

@@ -5,6 +5,7 @@
 
 pub mod school_date;
 pub mod class_no;
+pub mod dream;
 pub mod settle;
 pub mod support;
 

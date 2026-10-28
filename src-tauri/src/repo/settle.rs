@@ -1330,7 +1330,7 @@ pub fn program_rows(
     Ok(out)
 }
 
-fn budget_map(
+pub(crate) fn budget_map(
     conn: &Connection,
     settlement_id: i64,
     program: Program,
