@@ -14,6 +14,8 @@ import type {
   DreamReset,
   DreamSettings,
   DreamSession,
+  DreamAllocation,
+  DreamPriorityView,
   RevertPreview,
   BatchResult,
   BillingBatch,
@@ -476,6 +478,13 @@ export const api = {
     invoke<DreamSession>('dream_confirm_births', { jobId, path, keys }),
   dreamConfirmCourse: (jobId: number, path: string, courseCode: string, departmentId: number) =>
     invoke<DreamSession>('dream_confirm_course', { jobId, path, courseCode, departmentId }),
+  dreamPriority: (workspaceId: number) => invoke<DreamPriorityView>('dream_priority', { workspaceId }),
+  dreamSaveDeptPriority: (workspaceId: number, order: number[]) =>
+    invoke<DreamPriorityView>('dream_save_dept_priority', { workspaceId, order }),
+  dreamSaveItemPriority: (workspaceId: number, departmentId: number, order: string[]) =>
+    invoke<DreamPriorityView>('dream_save_item_priority', { workspaceId, departmentId, order }),
+  dreamAllocate: (jobId: number, path: string) => invoke<DreamAllocation>('dream_allocate', { jobId, path }),
+  dreamAllocation: (jobId: number, path: string) => invoke<DreamAllocation>('dream_allocation', { jobId, path }),
 }
 
 export type { Eligibility, Student, Department, Workspace, Year }

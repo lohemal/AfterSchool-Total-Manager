@@ -1366,7 +1366,7 @@ mod p3 {
         let mut last = None;
         for d in ["로봇", "만화", "미술", "공예"] {
             let code_ = dept(d).1;
-            let id = f.dp[d];
+            let Some(&id) = f.dp.get(d) else { continue };
             if !s.matching.courses.iter().any(|c| c.course_code == code_) {
                 continue;
             }
@@ -1697,7 +1697,8 @@ mod p3 {
     // ── 강좌
 
     #[test]
-    fn 확정된_강좌의_이름이_부서와_다르면_오류다() {
+    fn 확정된_강좌의_이름이_부서와_달라도_참고일_뿐이다() {
+        // P4 정책: 강좌코드 → 부서 연결이 기준이고 강좌명(J)은 열쇠가 아니다
         let f = F::mixed();
         setup(&f);
         f.db.write(|c| course::set(c, f.dp["로봇"], "PGM0001")).unwrap();
@@ -1705,11 +1706,21 @@ mod p3 {
         for r in rows.iter_mut() {
             r[9] = t("로봇과학 B");
         }
-        let s = start(&f, &xlsx(rows));
+        let bytes = xlsx(rows);
+        let s = start(&f, &bytes);
         let c = &s.matching.courses[0];
-        assert_eq!(c.state, State::Error);
-        assert_eq!(c.reasons[0].code, code::COURSE_NAME_MISMATCH);
-        assert_eq!(s.matching.students[0].state, State::Error);
+        assert_eq!(c.state, State::Ready);
+        assert_eq!(c.reasons[0].code, code::COURSE_NAME_DIFFERS);
+        assert_eq!(c.reasons[0].state, State::Ready, "참고");
+        let s = identities_all(&f, &s, &bytes);
+        assert_eq!(s.matching.students[0].state, State::Ready, "{:?}", codes(&s.matching.students[0]));
+        // 강좌명을 짐작해 맞추지는 않는다 — 연결이 없으면 '이름 같음' 추천이 나오지 않는다
+        f.db.write(|c| course::remove(c, f.dp["로봇"])).unwrap();
+        let s2 = f.db.write(|c| session::revalidate(c, s.job_id, &bytes)).unwrap();
+        let c2 = &s2.matching.courses[0];
+        assert_eq!(c2.department_id, None);
+        assert_eq!(c2.state, State::NeedsConfirmation);
+        assert!(!c2.suggestions.iter().any(|x| x.why.contains(&"SAME_NAME")));
     }
 
     #[test]
@@ -1776,7 +1787,12 @@ mod p3 {
         })
         .unwrap();
         assert!(s.matching.students.iter().all(|x| x.state == State::Ready));
-        assert!(s.matching.p4_ready);
+        // 학생은 모두 준비 완료지만 정산에 금액이 남은 B · C · D 가 파일에 없다 — 파일 전체 오류
+        let r = s.matching.file_reasons.iter().find(|r| r.code == code::SETTLEMENT_STUDENT_NOT_IN_FILE).unwrap();
+        assert_eq!(r.state, State::Error);
+        assert_eq!(s.matching.absent.len(), 3);
+        assert!(!s.matching.p4_ready);
+        assert_eq!(s.job_status, "BLOCKED");
     }
 
     #[test]
@@ -1940,13 +1956,10 @@ mod p3 {
     fn 파일_전체는_모든_학생이_준비_완료일_때만_다음_단계로_간다() {
         let f = F::mixed();
         setup(&f);
-        let mut rows = four("A", "로봇");
-        rows.extend(four("B", "만화"));
-        rows.extend(four("C", "미술"));
-        let bytes = xlsx(rows);
+        let bytes = xlsx(full_rows());
         let s = start(&f, &bytes);
         let s = courses_all(&f, &s, &bytes);
-        // A · B 만 확인
+        // 다솜만 빼고 확인
         let picks: Vec<(u32, i64)> = s
             .matching
             .students
@@ -1959,7 +1972,7 @@ mod p3 {
             session::revalidate(c, s.job_id, &bytes)
         })
         .unwrap();
-        assert_eq!((s.matching.ready, s.matching.needs_confirmation), (2, 1));
+        assert_eq!((s.matching.ready, s.matching.needs_confirmation), (5, 1));
         assert!(!s.matching.p4_ready);
         assert_eq!(s.job_status, "OPEN");
         let s = identities_all(&f, &s, &bytes);
@@ -2010,6 +2023,462 @@ mod p3 {
             .unwrap();
         for v in ["2024000001", "170101", "가온", "나래"] {
             assert!(!text.contains(v), "처리 이력에 {v}");
+        }
+    }
+
+    // ─────────────────────────────────────────────── P4 — 우선순위 · 재배분
+
+    mod p4 {
+        use super::*;
+        use crate::repo::dream::allocation::{self, Allocation, AllocStudent};
+
+        fn allocate(f: &F, job: i64, bytes: &[u8]) -> Allocation {
+            f.db.write(|c| allocation::allocate(c, job, bytes)).unwrap()
+        }
+
+        fn verify(f: &F, job: i64, bytes: &[u8]) -> Allocation {
+            f.db.read(|c| allocation::verify(c, job, bytes)).unwrap()
+        }
+
+        fn by_label<'a>(a: &'a Allocation, label_part: &str) -> &'a AllocStudent {
+            a.students.iter().find(|s| s.student_label.contains(label_part)).expect("학생")
+        }
+
+        /// (부서 화면 이름, 항목 코드) → (O, P, Q)
+        fn opq(s: &AllocStudent) -> Vec<(String, String, (i64, i64, i64))> {
+            s.lines.iter().map(|l| (l.dept_label.clone(), l.item_code.clone(), l.after)).collect()
+        }
+
+        fn after_rows(f: &F, job: i64) -> i64 {
+            cnt(&f.db, &format!("SELECT COUNT(*) FROM dream_job_row WHERE job_id = {job} AND after_o IS NOT NULL"))
+        }
+
+        fn versions(f: &F) -> (i64, i64) {
+            f.db.read(|c| {
+                let ws = repo::year::get_workspace(c, f.ws)?;
+                Ok((ws.data_version, repo::year::get_year(c, ws.year_id)?.data_version))
+            })
+            .unwrap()
+        }
+
+
+        // ── 전체 흐름
+
+        #[test]
+        fn 준비_완료_파일을_배분하면_학생과_파일_전체가_정산과_같다() {
+            let f = F::mixed();
+            setup(&f);
+            let before = f.db.read(|c| Ok(fingerprint(c, f.ws))).unwrap();
+            let dv = versions(&f);
+            let bytes = xlsx(full_rows());
+            let s = confirmed(&f, &bytes);
+            assert!(s.matching.p4_ready);
+            let a = allocate(&f, s.job_id, &bytes);
+            assert_eq!(a.status, "DONE", "{:?}", a.issues);
+            assert_eq!(a.job_status, "READY");
+            assert_eq!(a.students.len(), 6);
+            // 학생마다: ΣN = T · ΣP = V · ΣQ = F · ΣO = 개인부담, 줄마다 N = O + P + Q
+            for st in &a.students {
+                let x = &st.amount;
+                assert_eq!((st.after.n, st.after.p, st.after.q, st.after.o), (x.total, x.voucher, x.free_voucher, x.personal));
+                assert!(st.lines.iter().all(|l| l.after.0 + l.after.1 + l.after.2 == l.amount_n));
+                assert!(st.lines.iter().all(|l| l.after.0 >= 0 && l.after.1 >= 0 && l.after.2 >= 0));
+            }
+            // 파일 전체 = 정산 전체
+            assert_eq!(a.after, a.settlement);
+            assert_eq!(a.after.n, a.after.o + a.after.p + a.after.q);
+            assert_eq!(a.before.n, a.after.n, "N 은 바뀌지 않는다");
+            // 일반 수익자 · 이용권 전액(D: V + F = T)
+            let ga = by_label(&a, "가온");
+            assert!(ga.lines.iter().all(|l| l.after == (l.amount_n, 0, 0)));
+            let ra = by_label(&a, "라온");
+            assert_eq!(ra.after.o, 0);
+            // 0원 줄은 0 · 0 · 0
+            assert!(a.students.iter().flat_map(|s| &s.lines).filter(|l| l.amount_n == 0).all(|l| l.after == (0, 0, 0)));
+            // 저장: 모든 줄에 after, 기록에 지문
+            assert_eq!(after_rows(&f, s.job_id), 24);
+            let ev = f.db.read(|c| job::last_event(c, s.job_id, "ALLOCATE")).unwrap().unwrap();
+            assert!(ev.contains(&format!("fp={}", a.fingerprint.clone().unwrap())));
+            // 기존 자료 · 자료판 · 정산은 그대로
+            assert_eq!(f.db.read(|c| Ok(fingerprint(c, f.ws))).unwrap(), before);
+            assert_eq!(versions(&f), dv);
+            assert_eq!(f.state(), "FRESH");
+            assert_eq!(f.db.read(|c| Ok(fk_violations(c))).unwrap(), 0);
+            // 다시 확인하면 그대로 유효
+            let v = verify(&f, s.job_id, &bytes);
+            assert_eq!(v.status, "DONE");
+            assert_eq!(v.fingerprint, a.fingerprint);
+        }
+
+        #[test]
+        fn 이용권_초과금은_p_에_들어가지_않는다() {
+            // C: 이용권 3,400 + 초과(개인부담), J: 이용권 1,000 + 자유수강권 2,000 + 초과
+            let f = F::mixed();
+            setup(&f);
+            let bytes = xlsx(full_rows());
+            let s = confirmed(&f, &bytes);
+            let a = allocate(&f, s.job_id, &bytes);
+            let c = by_label(&a, "다솜");
+            assert!(c.amount.voucher_over > 0, "초과금이 있는 학생이어야 시험이 된다");
+            assert_eq!(c.after.p, c.amount.voucher);
+            assert_eq!(c.after.p, 3_400);
+            assert_eq!(c.after.o, c.amount.self_pay + c.amount.voucher_over);
+            let j = by_label(&a, "자람");
+            assert!(j.amount.voucher_over > 0);
+            assert_eq!((j.after.p, j.after.q), (1_000, 2_000));
+            assert_eq!(j.after.o, j.amount.personal);
+        }
+
+        #[test]
+        fn 준비_완료_작업이어도_배분_전에_p3_를_다시_돌린다() {
+            let f = F::mixed();
+            setup(&f);
+            let bytes = xlsx(full_rows());
+            let s = confirmed(&f, &bytes);
+            assert_eq!(s.job_status, "READY");
+            // READY 뒤에 강좌 연결이 사라졌다
+            f.db.write(|c| course::remove(c, f.dp["만화"])).unwrap();
+            let a = allocate(&f, s.job_id, &bytes);
+            assert_eq!(a.status, "NOT_READY");
+            assert_eq!(a.issues[0].code, allocation::code::P3_NOT_READY);
+            assert!(!a.session.as_ref().unwrap().matching.p4_ready, "다시 계산한 P3 결과를 돌려준다");
+            assert_eq!(after_rows(&f, s.job_id), 0);
+            // 파일이 바뀌면 계산하지 않는다
+            let other = xlsx(four("A", "로봇"));
+            assert_eq!(f.db.write(|c| allocation::allocate(c, s.job_id, &other)).unwrap_err().code, "FILE_CHANGED");
+            // 정산이 바뀌어도
+            f.db.write(|c| course::set(c, f.dp["만화"], "PGM0002")).unwrap();
+            f.generate();
+            assert_eq!(f.db.write(|c| allocation::allocate(c, s.job_id, &bytes)).unwrap_err().code, "SETTLEMENT_CHANGED");
+        }
+
+        // ── 우선순위
+
+        #[test]
+        fn 부서_순위를_바꾸면_결과가_무효가_되고_다시_계산하면_달라진다() {
+            let f = F::mixed();
+            setup(&f);
+            // 가온(A)이 로봇 · 미술을 듣고 이용권 40,000
+            f.enroll("A", "미술");
+            f.support("A", Program::Voucher, 40_000);
+            f.generate();
+            let mut rows = full_rows();
+            let (label, c_, fees) = dept("미술");
+            for (it, n) in ITEMS4.iter().zip(fees) {
+                rows.push(line(who("A"), label, c_, *it, n));
+            }
+            let bytes = xlsx(rows);
+            let s = confirmed(&f, &bytes);
+            assert!(s.matching.p4_ready, "{:?}", s.matching.file_reasons);
+            let (robot, art) = (f.dp["로봇"], f.dp["미술"]);
+            f.db.write(|c| allocation::save_dept_priority(c, f.ws, &[robot, art])).unwrap();
+            let a1 = allocate(&f, s.job_id, &bytes);
+            assert_eq!(a1.status, "DONE");
+            let g1 = by_label(&a1, "가온").clone();
+            assert_eq!(g1.order[0].label, "로봇과학B", "적용된 차례를 보여 준다");
+
+            let before = f.db.read(|c| Ok(fingerprint(c, f.ws))).unwrap();
+            let dv = versions(&f);
+            let n = f.db.write(|c| allocation::save_dept_priority(c, f.ws, &[art, robot])).unwrap();
+            assert_eq!(n, 1, "끝나지 않은 작업 하나의 결과를 비웠다");
+            assert_eq!(after_rows(&f, s.job_id), 0);
+            assert_eq!(verify(&f, s.job_id, &bytes).status, "STALE");
+            // 우선순위 저장은 정산 · 자료판을 건드리지 않는다
+            assert_eq!(f.db.read(|c| Ok(fingerprint(c, f.ws))).unwrap(), before);
+            assert_eq!(versions(&f), dv);
+            assert_eq!(f.state(), "FRESH");
+
+            let a2 = allocate(&f, s.job_id, &bytes);
+            assert_eq!(a2.status, "DONE");
+            let g2 = by_label(&a2, "가온");
+            assert_eq!(g2.order[0].label, "창의미술B");
+            assert_ne!(opq(&g1), opq(g2), "차례가 바뀌면 줄마다 결과가 바뀐다");
+            assert_eq!((g1.after.p, g1.after.q, g1.after.o), (g2.after.p, g2.after.q, g2.after.o), "총액은 그대로");
+            // 미술(29,200)부터 채운다: 미술 전부 P, 로봇은 남은 10,800
+            let art_p: i64 = g2.lines.iter().filter(|l| l.department_id == art).map(|l| l.after.1).sum();
+            assert_eq!(art_p, 29_200);
+            assert_ne!(a1.fingerprint, a2.fingerprint);
+            // 같은 차례로 다시 저장하면 결과를 비우지 않는다
+            assert_eq!(f.db.write(|c| allocation::save_dept_priority(c, f.ws, &[art, robot])).unwrap(), 0);
+            assert_eq!(verify(&f, s.job_id, &bytes).status, "DONE");
+        }
+
+        #[test]
+        fn 항목_순위는_부서마다_따로이고_바꾸면_결과가_무효가_된다() {
+            let f = F::mixed();
+            setup(&f);
+            let bytes = xlsx(full_rows());
+            let s = confirmed(&f, &bytes);
+            let a1 = allocate(&f, s.job_id, &bytes);
+            // 다솜(미술, 이용권 3,400): 기본 차례면 강사료에 들어간다
+            let c1 = by_label(&a1, "다솜").clone();
+            let art = f.dp["미술"];
+            let ins = |s: &AllocStudent, item: &str| s.lines.iter().find(|l| l.item_code == item).unwrap().after;
+            assert_eq!(ins(&c1, 강사료).1, 3_400);
+            let n = f
+                .db
+                .write(|c| allocation::save_item_priority(c, art, &[수용비.into(), 강사료.into()]))
+                .unwrap();
+            assert_eq!(n, 1);
+            assert_eq!(verify(&f, s.job_id, &bytes).status, "STALE");
+            let a2 = allocate(&f, s.job_id, &bytes);
+            let c2 = by_label(&a2, "다솜");
+            assert_eq!((ins(c2, 수용비).1, ins(c2, 강사료).1), (1_200, 2_200));
+            assert_eq!(c2.order[0].items[..2], ["수용비".to_string(), "강사료".to_string()]);
+            // 다른 부서(로봇) 학생은 차례가 그대로라 결과도 그대로
+            assert_eq!(opq(by_label(&a1, "자람")), opq(by_label(&a2, "자람")));
+            let robot_items = f.db.read(|c| priority::item_order(c, f.dp["로봇"])).unwrap();
+            assert_eq!(robot_items[0], 강사료);
+        }
+
+        #[test]
+        fn 방과후드림_순위가_없으면_기존_정산_순위_그것도_없으면_정해진_차례다() {
+            let f = F::mixed();
+            let (robot, art) = (f.dp["로봇"], f.dp["미술"]);
+            let v = f.db.read(|c| allocation::priority_view(c, f.ws)).unwrap();
+            assert_eq!(v.dept_source, "DEFAULT");
+            assert!(v.departments.iter().all(|d| d.item_source == "DEFAULT"));
+            // 정해진 차례: 부서명 차례(글자 차례 — 로봇과학 · 만화애니메이션 · 창의미술 · 토탈공예)
+            let labels: Vec<&str> = v.departments.iter().map(|d| d.label.as_str()).collect();
+            assert_eq!(labels, ["로봇과학B", "만화애니메이션B", "창의미술B", "토탈공예미니어처B"]);
+            assert!(v.departments.iter().all(|d| d.in_use));
+            // 기존 정산 순위가 있으면 그것을 기본값으로(읽기만)
+            f.db.write(|c| repo::priority::dept_save(c, f.ws, &[art, robot])).unwrap();
+            f.generate();
+            let v = f.db.read(|c| allocation::priority_view(c, f.ws)).unwrap();
+            assert_eq!(v.dept_source, "SETTLEMENT");
+            assert_eq!(v.departments[0].department_id, art);
+            // 방과후드림 순위를 저장하면 그것이 먼저고, 기존 정산 순위는 그대로
+            let settle_before = f.db.read(|c| repo::priority::dept_order(c, f.ws)).unwrap();
+            f.db.write(|c| allocation::save_dept_priority(c, f.ws, &[robot])).unwrap();
+            let v = f.db.read(|c| allocation::priority_view(c, f.ws)).unwrap();
+            assert_eq!(v.dept_source, "DREAM");
+            assert_eq!(v.departments[0].department_id, robot);
+            assert_eq!(v.departments[1].department_id, art, "늘어놓지 않은 부서는 지금 차례 그대로 뒤에");
+            assert_eq!(f.db.read(|c| repo::priority::dept_order(c, f.ws)).unwrap(), settle_before);
+            assert_eq!(f.state(), "FRESH");
+            // 같은 자료면 언제나 같은 차례
+            let d1 = f.db.read(|c| allocation::priority_view(c, f.ws)).unwrap().digest;
+            let d2 = f.db.read(|c| allocation::priority_view(c, f.ws)).unwrap().digest;
+            assert_eq!(d1, d2);
+        }
+
+        #[test]
+        fn 기존_정산_배분과_달라도_학생_총액이_같으면_정상이다() {
+            let mut f = F::new();
+            f.dept("로봇", "로봇과학", "B", vec![fee(강사료, 35_000), fee(수용비, 1_500)]);
+            f.dept("미술", "창의미술", "B", vec![fee(강사료, 28_000), fee(수용비, 1_200)]);
+            f.student("A", 3, "1", 1, "가온");
+            f.enroll("A", "로봇");
+            f.enroll("A", "미술");
+            f.support("A", Program::Voucher, 40_000);
+            let (robot, art) = (f.dp["로봇"], f.dp["미술"]);
+            // 기존 정산: 로봇 먼저
+            f.db.write(|c| repo::priority::dept_save(c, f.ws, &[robot, art])).unwrap();
+            f.generate();
+            setup(&f);
+            let settle_voucher = |d: i64| {
+                cnt(
+                    &f.db,
+                    &format!("SELECT COALESCE(SUM(amount), 0) FROM settlement_alloc WHERE department_id = {d} AND fund = 'VOUCHER'"),
+                )
+            };
+            assert_eq!((settle_voucher(robot), settle_voucher(art)), (36_500, 3_500));
+            // 방과후드림: 미술 먼저
+            f.db.write(|c| allocation::save_dept_priority(c, f.ws, &[art, robot])).unwrap();
+            let mut rows = four("A", "로봇");
+            rows.extend(four("A", "미술"));
+            let bytes = xlsx(rows);
+            let s = confirmed(&f, &bytes);
+            let a = allocate(&f, s.job_id, &bytes);
+            assert_eq!(a.status, "DONE", "{:?}", a.issues);
+            let st = &a.students[0];
+            let p_of = |d: i64| st.lines.iter().filter(|l| l.department_id == d).map(|l| l.after.1).sum::<i64>();
+            assert_eq!((p_of(robot), p_of(art)), (10_800, 29_200));
+            assert_eq!(st.after.p, 40_000);
+            assert_eq!(f.state(), "FRESH");
+        }
+
+        // ── 파일 전체성 — 취소 학생 포함
+
+        /// A 수강 중(36,500) · B 취소 뒤 20,000 남음 · C 취소 뒤 0원
+        fn cancelled() -> F {
+            let mut f = F::new();
+            f.dept("로봇", "로봇과학", "B", vec![fee(강사료, 35_000), fee(수용비, 1_500)]);
+            f.student("A", 3, "1", 1, "가온");
+            f.student("B", 3, "1", 2, "나래");
+            f.student("C", 3, "1", 3, "다솜");
+            for k in ["A", "B", "C"] {
+                f.enroll(k, "로봇");
+            }
+            f.support("B", Program::Voucher, 15_000);
+            let items = f.items.clone();
+            for (k, left) in [("B", 20_000), ("C", 0)] {
+                let eid = cnt(&f.db, &format!("SELECT id FROM enrollment WHERE student_id = {}", f.st[k]));
+                f.db.write(|c| repo::enrollment::cancel(c, eid, Some(&[fee(강사료, left), fee(수용비, 0)]), "시험", &items))
+                    .unwrap();
+            }
+            f.generate();
+            assert_eq!(f.state(), "FRESH");
+            setup(&f);
+            f
+        }
+
+        fn b_rows() -> Vec<Vec<V>> {
+            let mut rows = four("B", "로봇");
+            rows[0][13] = V::N(20_000.0);
+            rows[0][14] = V::N(20_000.0);
+            rows[1][13] = V::N(0.0);
+            rows[1][14] = V::N(0.0);
+            rows
+        }
+
+        #[test]
+        fn 취소했어도_정산에_금액이_남은_학생은_파일에_있어야_한다() {
+            let f = cancelled();
+            // A + B (C 는 0원이라 없어도 된다)
+            let mut rows = four("A", "로봇");
+            rows.extend(b_rows());
+            let bytes = xlsx(rows);
+            let s = confirmed(&f, &bytes);
+            assert!(s.matching.p4_ready, "{:?}", s.matching.file_reasons);
+            assert!(s.matching.absent.is_empty());
+            assert_eq!((s.matching.file_total, s.matching.settlement_total), (56_500, 56_500));
+            let a = allocate(&f, s.job_id, &bytes);
+            assert_eq!(a.status, "DONE");
+            let b = by_label(&a, "나래");
+            assert_eq!((b.after.n, b.after.p, b.after.o), (20_000, 15_000, 5_000));
+        }
+
+        #[test]
+        fn 취소_학생이_파일에_없으면_파일_전체_오류다() {
+            let f = cancelled();
+            let bytes = xlsx(four("A", "로봇"));
+            let s = confirmed(&f, &bytes);
+            let m = &s.matching;
+            assert_eq!(m.students[0].state, State::Ready, "A 자체는 맞다");
+            let r = m.file_reasons.iter().find(|r| r.code == code::SETTLEMENT_STUDENT_NOT_IN_FILE).unwrap();
+            assert_eq!(r.state, State::Error);
+            assert_eq!(r.detail.as_deref(), Some("1명 · 20000원"));
+            assert_eq!(m.absent.len(), 1);
+            assert_eq!((m.absent[0].student_id, m.absent[0].total, m.absent[0].cancelled), (f.st["B"], 20_000, true));
+            assert!(m.file_reasons.iter().any(|r| r.code == code::FILE_TOTAL_MISMATCH));
+            assert!(!m.p4_ready);
+            assert_eq!(s.job_status, "BLOCKED");
+            let a = allocate(&f, s.job_id, &bytes);
+            assert_eq!(a.status, "NOT_READY");
+            assert_eq!(after_rows(&f, s.job_id), 0);
+        }
+
+        #[test]
+        fn 취소_학생의_남은_charge_가_파일에_없으면_오류다() {
+            let f = cancelled();
+            let mut rows = four("A", "로봇");
+            let mut b = b_rows();
+            b.remove(0); // 남은 강사료 20,000 줄이 빠졌다
+            rows.extend(b);
+            let s = confirmed(&f, &xlsx(rows));
+            let b = student(&s.matching, "나래");
+            assert!(codes(b).contains(&code::DB_CHARGE_NOT_IN_FILE), "{:?}", codes(b));
+            assert_eq!(b.state, State::Error);
+            assert!(!s.matching.p4_ready);
+        }
+
+        #[test]
+        fn 학생별로_틀렸는데_파일_합계만_맞아도_통과하지_않는다() {
+            let f = F::mixed();
+            setup(&f);
+            let mut rows = full_rows();
+            // 가온 강사료 −1,000, 자람 강사료 +1,000 — 파일 ΣN 은 그대로
+            let ga = rows.iter().position(|r| matches!(&r[6], V::S(x) if x == "가온")).unwrap();
+            let ja = rows.iter().position(|r| matches!(&r[6], V::S(x) if x == "자람")).unwrap();
+            rows[ga][13] = V::N(34_000.0);
+            rows[ja][13] = V::N(36_000.0);
+            let bytes = xlsx(rows);
+            let s = confirmed(&f, &bytes);
+            assert_eq!(s.matching.file_total, s.matching.settlement_total);
+            assert!(!s.matching.file_reasons.iter().any(|r| r.code == code::FILE_TOTAL_MISMATCH));
+            assert_eq!(s.matching.errors, 2);
+            assert_eq!(allocate(&f, s.job_id, &bytes).status, "NOT_READY");
+        }
+
+        #[test]
+        fn 정산이_바뀌어_전체가_맞지_않으면_예전_결과를_쓰지_않는다() {
+            let f = F::mixed();
+            setup(&f);
+            let bytes = xlsx(full_rows());
+            let s = confirmed(&f, &bytes);
+            assert_eq!(allocate(&f, s.job_id, &bytes).status, "DONE");
+            f.generate(); // 다시 정산
+            let e = f.db.read(|c| allocation::verify(c, s.job_id, &bytes)).unwrap_err();
+            assert_eq!(e.code, "SETTLEMENT_CHANGED");
+            assert_eq!(
+                f.db.read(|c| allocation::require_valid(c, s.job_id, &bytes)).unwrap_err().code,
+                "SETTLEMENT_CHANGED"
+            );
+        }
+
+        #[test]
+        fn 다시_검증하거나_학생_확정이_바뀌면_배분_결과는_남지_않는다() {
+            let f = F::mixed();
+            setup(&f);
+            let bytes = xlsx(full_rows());
+            let s = confirmed(&f, &bytes);
+            assert_eq!(allocate(&f, s.job_id, &bytes).status, "DONE");
+            // P3 다시 검증 — 줄 기록을 새로 쓰므로 after 가 없다
+            f.db.write(|c| session::revalidate(c, s.job_id, &bytes)).unwrap();
+            assert_eq!(after_rows(&f, s.job_id), 0);
+            assert_eq!(verify(&f, s.job_id, &bytes).status, "STALE");
+            assert_eq!(
+                f.db.read(|c| allocation::require_valid(c, s.job_id, &bytes)).unwrap_err().code,
+                "ALLOCATION_STALE"
+            );
+            // 다시 계산하면 같은 지문(같은 입력 · 같은 차례)
+            let a1 = allocate(&f, s.job_id, &bytes);
+            let a2 = allocate(&f, s.job_id, &bytes);
+            assert_eq!(a1.fingerprint, a2.fingerprint);
+            assert_eq!(
+                serde_json::to_string(&a1.students).unwrap(),
+                serde_json::to_string(&a2.students).unwrap()
+            );
+            // 저장된 after 를 누가 바꿔 놓으면 유효하지 않다
+            f.db.write(|c| {
+                c.execute(
+                    &format!("UPDATE dream_job_row SET after_o = after_o + 1 WHERE job_id = {} AND source_row = 2", s.job_id),
+                    [],
+                )?;
+                Ok(())
+            })
+            .unwrap();
+            assert_eq!(verify(&f, s.job_id, &bytes).status, "STALE");
+        }
+
+        #[test]
+        fn 배분_결과와_기록에_개인정보_원문이_없다() {
+            let f = F::mixed();
+            setup(&f);
+            let bytes = xlsx(full_rows());
+            let s = confirmed(&f, &bytes);
+            let a = allocate(&f, s.job_id, &bytes);
+            let mut v = serde_json::to_value(&a).unwrap();
+            v["session"] = serde_json::Value::Null; // P3 결과는 P3 시험이 본다
+            let json = v.to_string();
+            for x in ["2024000001", "2024000006", "170101", "140606"] {
+                assert!(!json.contains(x), "배분 결과에 {x}");
+            }
+            let events: String = f
+                .db
+                .read(|c| {
+                    let v: Vec<String> = c
+                        .prepare("SELECT kind || ':' || detail FROM dream_job_event")?
+                        .query_map([], |r| r.get(0))?
+                        .collect::<rusqlite::Result<_>>()?;
+                    Ok(v.join("|"))
+                })
+                .unwrap();
+            for x in ["2024000001", "170101", "가온", "나래", "다솜"] {
+                assert!(!events.contains(x), "기록에 {x}");
+            }
         }
     }
 }

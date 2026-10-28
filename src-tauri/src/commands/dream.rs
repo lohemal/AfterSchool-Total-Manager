@@ -1,8 +1,9 @@
-//! 방과후드림 결제관리 명령 (P2 — 파일 읽기 · 검증 · 미리보기).
+//! 방과후드림 결제관리 명령 (P2 파일 읽기 · 검증 · 미리보기, P3 매칭, P4 우선순위 · 배분).
 //!
-//! 이 단계에서는 금액을 배분하거나 파일을 고치지 않는다. 결제파일은 **읽기만** 하고,
-//! DB 에 쓰는 것은 기관코드 · 결제 기준월 · (화면 진입 때) 30일 지난 처리 이력 정리 ·
-//! (사람이 고를 때) 개인정보 초기화뿐이다. 모두 정산 자료판과 무관하다.
+//! 결제파일은 **읽기만** 한다(P4 까지 원본 · 결과 Excel 을 쓰지 않는다). DB 에 쓰는 것은
+//! 기관코드 · 결제 기준월 · (화면 진입 때) 30일 지난 처리 이력 정리 · (사람이 고를 때)
+//! 개인정보 초기화 · 개인참조번호 · 강좌 연결 · 방과후드림 우선순위 · 처리 이력(배분 결과
+//! 포함)뿐이다. 모두 `dream_*` 표라 정산 자료판과 무관하다.
 
 use std::path::Path;
 
@@ -223,4 +224,55 @@ pub fn dream_confirm_course(
         session::revalidate(c, job_id, &bytes)
     })
     .map_err(|e| close_if_stale(&db, job_id, e))
+}
+
+// ─────────────────────────────────────────────── P4 — 우선순위 · 배분
+
+use crate::repo::dream::allocation::{self, Allocation, PriorityView};
+
+#[tauri::command]
+pub fn dream_priority(db: State<'_, Db>, workspace_id: i64) -> AppResult<PriorityView> {
+    db.read(|c| allocation::priority_view(c, workspace_id))
+}
+
+/// 방과후드림 부서 차례 저장 — 기존 정산 순위 · 자료판은 그대로다. 바뀌었으면 끝나지 않은
+/// 작업의 배분 결과를 비운다(다시 계산해야 한다).
+#[tauri::command]
+pub fn dream_save_dept_priority(db: State<'_, Db>, workspace_id: i64, order: Vec<i64>) -> AppResult<PriorityView> {
+    db.write(|c| {
+        allocation::save_dept_priority(c, workspace_id, &order)?;
+        allocation::priority_view(c, workspace_id)
+    })
+}
+
+#[tauri::command]
+pub fn dream_save_item_priority(
+    db: State<'_, Db>,
+    workspace_id: i64,
+    department_id: i64,
+    order: Vec<String>,
+) -> AppResult<PriorityView> {
+    db.write(|c| {
+        let ws: i64 = c.query_row("SELECT workspace_id FROM department WHERE id = ?1", [department_id], |r| r.get(0))?;
+        if ws != workspace_id {
+            return Err(AppError::invalid("이 작업공간의 부서가 아닙니다."));
+        }
+        allocation::save_item_priority(c, department_id, &order)?;
+        allocation::priority_view(c, workspace_id)
+    })
+}
+
+/// [배분 계산] — 파일 지문 · 정산 · P3 전체를 다시 확인한 뒤 계산하고, 모두 통과해야 저장한다.
+#[tauri::command]
+pub fn dream_allocate(db: State<'_, Db>, job_id: i64, path: String) -> AppResult<Allocation> {
+    let (_, bytes) = read_source(&path)?;
+    db.write(|c| allocation::allocate(c, job_id, &bytes))
+        .map_err(|e| close_if_stale(&db, job_id, e))
+}
+
+/// 저장된 배분 결과가 지금도 유효한가(아무것도 적지 않는다).
+#[tauri::command]
+pub fn dream_allocation(db: State<'_, Db>, job_id: i64, path: String) -> AppResult<Allocation> {
+    let (_, bytes) = read_source(&path)?;
+    db.read(|c| allocation::verify(c, job_id, &bytes))
 }

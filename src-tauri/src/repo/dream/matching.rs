@@ -17,8 +17,10 @@
 //!
 //! ## 강좌 — 확정된 강좌코드 연결만 믿는다
 //!
-//! `K 강좌명코드 → dream_course_map → 부서`. 강좌명(J)은 그 부서의 화면 이름
-//! (`부서명+반 이름`)과 정확히 같아야 하고, 연결이 없으면 후보를 **제안만** 한다.
+//! `K 강좌명코드 → dream_course_map → 부서`. 사람이 확정한 이 연결이 기준이다. 강좌명(J)은
+//! 열쇠가 아니다 — 연결 전에는 후보를 **제안**하는 데, 연결 뒤에는 부서 화면 이름
+//! (`부서명+반 이름`)과 표기가 다르면 **참고로 알리는** 데만 쓴다(P4 에서 정한 정책).
+//! 학생이 그 부서를 실제로 수강하고 Charge 가 맞는지는 그대로 엄격하게 본다.
 //!
 //! ## 금액 — 정산에 들어간 Charge 와 줄마다, 학생마다
 //!
@@ -32,6 +34,12 @@
 //!
 //! 한 학생의 줄 가운데 하나라도 오류 · 확인 필요면 그 학생 전체가 준비 완료가 아니다.
 //! 파일 안의 모든 학생이 준비 완료여야 다음 단계(배분)로 갈 수 있다.
+//!
+//! ## 파일 전체 — 정산 전체를 빠짐없이
+//!
+//! 기준은 지금 수강 중인 학생이 아니라 **최신 유효 정산에 금액이 남은 모든 학생**이다
+//! (취소했어도 Charge 가 남아 정산에 들어갔으면 포함). 그런 학생이 파일에 없으면 파일 전체
+//! 오류다. 그리고 `파일 ΣN == 정산 전체 T == 정산에 들어간 양수 Charge 전체 합`.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
@@ -86,6 +94,14 @@ fn confirm(code: &'static str) -> Reason {
     }
 }
 
+/// 참고 — 판정을 바꾸지 않는다.
+fn note(code: &'static str) -> Reason {
+    Reason {
+        state: State::Ready,
+        ..err(code)
+    }
+}
+
 impl Reason {
     fn row(mut self, r: u32) -> Self {
         self.row = Some(r);
@@ -101,7 +117,12 @@ impl Reason {
 pub mod code {
     pub const SETTLEMENT_NOT_FRESH: &str = "SETTLEMENT_NOT_FRESH";
     pub const BUDGET_CROSSCHECK_FAILED: &str = "BUDGET_CROSSCHECK_FAILED";
-    pub const SETTLED_STUDENT_NOT_IN_FILE: &str = "SETTLED_STUDENT_NOT_IN_FILE";
+    /// 최신 정산에 금액이 남았는데 파일에 없는 학생(파일 전체 오류)
+    pub const SETTLEMENT_STUDENT_NOT_IN_FILE: &str = "SETTLEMENT_STUDENT_NOT_IN_FILE";
+    /// 파일 ΣN ≠ 정산 전체 T
+    pub const FILE_TOTAL_MISMATCH: &str = "FILE_TOTAL_MISMATCH";
+    /// 정산 전체 T ≠ 이 작업공간의 양수 Charge 전체 합
+    pub const SETTLEMENT_CHARGE_TOTAL_MISMATCH: &str = "SETTLEMENT_CHARGE_TOTAL_MISMATCH";
     // 학생
     pub const STUDENT_INFO_INCONSISTENT: &str = "STUDENT_INFO_INCONSISTENT";
     pub const STUDENT_REF_NOT_REGISTERED: &str = "STUDENT_REF_NOT_REGISTERED";
@@ -117,7 +138,8 @@ pub mod code {
     pub const STUDENT_BIRTH_NOT_REGISTERED: &str = "STUDENT_BIRTH_NOT_REGISTERED";
     // 강좌
     pub const COURSE_MAP_MISSING: &str = "COURSE_MAP_MISSING";
-    pub const COURSE_NAME_MISMATCH: &str = "COURSE_NAME_MISMATCH";
+    /// 확정된 연결의 강좌명 표기가 부서 이름과 다름 — 참고(판정에 쓰지 않는다)
+    pub const COURSE_NAME_DIFFERS: &str = "COURSE_NAME_DIFFERS";
     pub const COURSE_NAME_INCONSISTENT: &str = "COURSE_NAME_INCONSISTENT";
     pub const ENROLLMENT_NOT_FOUND: &str = "ENROLLMENT_NOT_FOUND";
     pub const ENROLLMENT_AMBIGUOUS: &str = "ENROLLMENT_AMBIGUOUS";
@@ -241,8 +263,27 @@ pub struct Matching {
     pub ready: usize,
     pub needs_confirmation: usize,
     pub errors: usize,
+    /// 최신 정산에 금액이 남았는데 파일에 없는 학생(취소 포함)
+    pub absent: Vec<AbsentStudent>,
+    /// 파일 ΣN
+    pub file_total: i64,
+    /// 최신 정산 전체 T
+    pub settlement_total: i64,
     /// 모든 학생이 준비 완료이고 파일 · 정산 문제가 없는가 — 배분 단계로 갈 수 있는가
     pub p4_ready: bool,
+}
+
+/// 정산에는 있는데 파일에 없는 학생. 화면에만 보여 준다(처리 이력 · 로그에는 건수만).
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AbsentStudent {
+    pub student_id: i64,
+    pub label: String,
+    /// 정산 T
+    pub total: i64,
+    /// 이 작업공간의 수강이 모두 취소인가
+    pub cancelled: bool,
+    pub depts: Vec<String>,
 }
 
 // ─────────────────────────────────────────────── 읽기
@@ -417,9 +458,9 @@ fn match_courses(conn: &Connection, ws: i64, file: &DreamFile) -> AppResult<Vec<
                 let lbl = depts.iter().find(|d| d.id == dept).map(|d| d.label.clone()).unwrap_or_default();
                 m.department_id = Some(dept);
                 m.dept_label = Some(lbl.clone());
-                // 강좌명은 부서 화면 이름(부서명+반 이름)과 정확히 같아야 한다
+                // 확정된 연결이 기준이다. 강좌명 표기가 달라도 참고로만 알린다
                 if names.len() == 1 && names[0] != lbl {
-                    m.reasons.push(err(code::COURSE_NAME_MISMATCH).detail(format!("{} ≠ {lbl}", names[0])));
+                    m.reasons.push(note(code::COURSE_NAME_DIFFERS).detail(format!("{} · {lbl}", names[0])));
                 }
             }
             None => {
@@ -774,6 +815,72 @@ fn check_lines(
 
 // ─────────────────────────────────────────────── 파일 전체
 
+/// 파일이 최신 정산 전체를 빠짐없이 나타내는가.
+///
+/// 기준 집합은 수강 상태가 아니라 **정산 금액**이다: 정산 배분(`settlement_alloc`)에 금액이
+/// 있는 모든 학생(`amounts`, T > 0). 취소한 수강이어도 Charge 가 남아 정산됐으면 들어 있다.
+/// 학생마다의 양수 Charge 누락은 `check_lines` 가 본다(`DB_CHARGE_NOT_IN_FILE`).
+fn check_whole(conn: &Connection, ws: i64, amounts: &HashMap<i64, StudentAmount>, out: &mut Matching) -> AppResult<()> {
+    // 개인참조번호로 확정됐거나 후보가 하나뿐인 학생. 후보 학생은 확정 전이지만 '없다'고
+    // 따로 세면 같은 학생을 두 번 알리게 된다(확정 전이라 어차피 다음 단계로 못 간다)
+    let in_file: BTreeSet<i64> = out
+        .students
+        .iter()
+        .filter_map(|s| s.student_id.or_else(|| (s.candidates.len() == 1).then(|| s.candidates[0].student_id)))
+        .collect();
+    let mut absent: Vec<&StudentAmount> = amounts
+        .values()
+        .filter(|a| a.total > 0 && !in_file.contains(&a.student_id))
+        .collect();
+    absent.sort_by_key(|a| a.student_id);
+    for a in absent {
+        let Some((_, s)) = db_student(conn, a.student_id)? else {
+            return Err(crate::error::AppError::new("INTERNAL", "정산에 있는 학생을 찾지 못했습니다."));
+        };
+        let mut st = conn.prepare(
+            "SELECT d.name, d.class_name, e.status FROM enrollment e JOIN department d ON d.id = e.department_id
+              WHERE e.workspace_id = ?1 AND e.student_id = ?2 ORDER BY d.name, d.class_name, e.id",
+        )?;
+        let enr: Vec<(String, String, String)> = st
+            .query_map(params![ws, a.student_id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
+            .collect::<rusqlite::Result<_>>()?;
+        let depts: BTreeSet<String> = enr.iter().map(|e| dept_label(&e.0, &e.1)).collect();
+        out.absent.push(AbsentStudent {
+            student_id: a.student_id,
+            label: label(&s),
+            total: a.total,
+            cancelled: !enr.is_empty() && enr.iter().all(|e| e.2 == "CANCELLED"),
+            depts: depts.into_iter().collect(),
+        });
+    }
+    if !out.absent.is_empty() {
+        let sum: i64 = out.absent.iter().map(|a| a.total).sum();
+        out.file_reasons
+            .push(err(code::SETTLEMENT_STUDENT_NOT_IN_FILE).detail(format!("{}명 · {sum}원", out.absent.len())));
+    }
+
+    // 정산 전체 T == 이 작업공간의 양수 Charge 전체 합(정산 대상은 금액으로 정한다)
+    out.settlement_total = amounts.values().map(|a| a.total).sum();
+    let charges: i64 = conn.query_row(
+        "SELECT COALESCE(SUM(c.amount), 0) FROM charge c JOIN enrollment e ON e.id = c.enrollment_id
+          WHERE e.workspace_id = ?1 AND c.amount > 0",
+        params![ws],
+        |r| r.get(0),
+    )?;
+    if charges != out.settlement_total {
+        out.file_reasons.push(
+            err(code::SETTLEMENT_CHARGE_TOTAL_MISMATCH).detail(format!("Charge {charges} · 정산 {}", out.settlement_total)),
+        );
+    }
+    // 파일 ΣN == 정산 전체 T — 학생마다 맞아도 여기서 다시 본다(둘 다 필요하다)
+    if out.file_total != out.settlement_total {
+        out.file_reasons.push(
+            err(code::FILE_TOTAL_MISMATCH).detail(format!("파일 {} · 정산 {}", out.file_total, out.settlement_total)),
+        );
+    }
+    Ok(())
+}
+
 /// 파일 전체를 맞대어 본다. 읽기만 한다. `key` 는 키가 아직 없으면 None(그러면 아무도
 /// 개인참조번호로 찾을 수 없다 — 모두 후보 검색으로 간다).
 pub fn run(conn: &Connection, workspace_id: i64, file: &DreamFile, key: Option<&DataKey>) -> AppResult<Matching> {
@@ -786,6 +893,9 @@ pub fn run(conn: &Connection, workspace_id: i64, file: &DreamFile, key: Option<&
         ready: 0,
         needs_confirmation: 0,
         errors: 0,
+        absent: Vec::new(),
+        file_total: file.rows.iter().filter_map(|r| r.amount_n).sum(),
+        settlement_total: 0,
         p4_ready: false,
     };
 
@@ -867,21 +977,8 @@ pub fn run(conn: &Connection, workspace_id: i64, file: &DreamFile, key: Option<&
         }
     }
 
-    // 정산에는 있는데 파일에 없는 학생 — 참고(이 파일로 그 학생 결제가 나가지 않는다)
-    let in_file: BTreeSet<i64> = out
-        .students
-        .iter()
-        .filter_map(|s| s.student_id.or_else(|| (s.candidates.len() == 1).then(|| s.candidates[0].student_id)))
-        .collect();
-    let absent = amounts.values().filter(|a| a.total > 0 && !in_file.contains(&a.student_id)).count();
-    if absent > 0 {
-        out.file_reasons.push(Reason {
-            code: code::SETTLED_STUDENT_NOT_IN_FILE,
-            state: State::Ready,
-            row: None,
-            detail: Some(absent.to_string()),
-        });
-    }
+    // 파일 전체 — 정산에 금액이 남은 학생이 모두 있는가, 전체 금액이 같은가
+    check_whole(conn, workspace_id, &amounts, &mut out)?;
 
     out.ready = out.students.iter().filter(|s| s.state == State::Ready).count();
     out.needs_confirmation = out.students.iter().filter(|s| s.state == State::NeedsConfirmation).count();

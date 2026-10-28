@@ -6,6 +6,8 @@
  * 있고, 실제 번호 · 생년월일은 서버가 고른 파일에서 다시 읽는다.
  *
  * 확정한 뒤에는 그 한 줄이 아니라 파일 전체를 다시 검증한 결과로 바꿔 그린다.
+ *
+ * 모두 준비 완료가 되면 아래에 배분 우선순위 · 배분 계산(P4, `DreamAllocPanel`)이 이어진다.
  */
 
 import { useMutation } from '@tanstack/react-query'
@@ -23,6 +25,8 @@ import type {
   DreamStudentMatch,
 } from '@/ipc/types'
 import { matchStateLabel, reasonText } from '@/lib/dream'
+
+import { DreamAllocPanel } from './DreamAllocPanel'
 
 function StateTag({ s }: { s: DreamMatchState }) {
   const cls = s === 'READY' ? 'tag tag--free' : s === 'NEEDS_CONFIRMATION' ? 'tag tag--warn' : 'tag tag--bad'
@@ -48,14 +52,15 @@ export function DreamMatchPanel({
   // 다른 파일 · 다른 검사 결과면 진행 중이던 작업은 버린다
   useEffect(() => setSession(null), [path, check.sha256, workspaceId])
 
+  const failed = (e: unknown) => {
+    const code = (e as { code?: string }).code ?? ''
+    toast.bad(errorMessage(e))
+    if (RESTART.has(code)) setSession(null)
+  }
   const run = useMutation({
     mutationFn: (f: () => Promise<DreamSession>) => f(),
     onSuccess: (s) => setSession(s),
-    onError: (e) => {
-      const code = (e as { code?: string }).code ?? ''
-      toast.bad(errorMessage(e))
-      if (RESTART.has(code)) setSession(null)
-    },
+    onError: failed,
   })
 
   if (check.status === 'ERROR') return null
@@ -105,11 +110,44 @@ export function DreamMatchPanel({
             <div className="stat__sub">모든 학생이 준비 완료여야 합니다</div>
           </div>
         </div>
+        <div className="hint" style={{ margin: '4px 0' }}>
+          파일 전체 정산금액 {won(m.fileTotal)}원 · 최신 정산 전체 {won(m.settlementTotal)}원{' '}
+          {m.settlementId !== null &&
+            (m.fileTotal === m.settlementTotal ? (
+              <span className="tag tag--free">일치</span>
+            ) : (
+              <span className="tag tag--bad">불일치</span>
+            ))}
+        </div>
         {m.fileReasons.map((r, i) => (
           <Notice key={i} tone={r.state === 'READY' ? 'info' : 'bad'}>
             {reasonText(r)}
           </Notice>
         ))}
+        {m.absent.length > 0 && (
+          <div className="tableWrap" style={{ maxHeight: 240 }}>
+            <table className="table">
+              <thead>
+                <tr>
+                  <th className="left">정산에 있는데 파일에 없는 학생</th>
+                  <th className="left">부서</th>
+                  <th>수강 상태</th>
+                  <th className="num">정산 금액</th>
+                </tr>
+              </thead>
+              <tbody>
+                {m.absent.map((a) => (
+                  <tr key={a.studentId}>
+                    <td className="left">{a.label}</td>
+                    <td className="left">{a.depts.join(', ')}</td>
+                    <td>{a.cancelled ? '취소(금액 남음)' : '수강 중'}</td>
+                    <td className="num">{won(a.total)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </Card>
 
       <CourseCard
@@ -125,6 +163,7 @@ export function DreamMatchPanel({
         onBirth={(keys) => run.mutate(() => api.dreamConfirmBirths(jobId, path, keys))}
       />
       <StudentCard students={m.students} />
+      <DreamAllocPanel workspaceId={workspaceId} path={path} session={session} onSession={setSession} onError={failed} />
     </>
   )
 }

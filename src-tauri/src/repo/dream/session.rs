@@ -41,7 +41,7 @@ fn file_changed() -> AppError {
 }
 
 /// 파일을 읽고 P2 검사를 다시 통과하는지 본다.
-fn parse_ok(conn: &Connection, ws: i64, file_name: &str, bytes: &[u8]) -> AppResult<DreamFile> {
+pub(crate) fn parse_ok(conn: &Connection, ws: i64, file_name: &str, bytes: &[u8]) -> AppResult<DreamFile> {
     let c = file_check::check(conn, ws, file_name, bytes)?;
     if c.status == "ERROR" {
         return Err(AppError::invalid(
@@ -51,7 +51,7 @@ fn parse_ok(conn: &Connection, ws: i64, file_name: &str, bytes: &[u8]) -> AppRes
     Ok(dream_file::parse(file_name, bytes))
 }
 
-fn usable_key(conn: &Connection) -> AppResult<Option<crypto::DataKey>> {
+pub(crate) fn usable_key(conn: &Connection) -> AppResult<Option<crypto::DataKey>> {
     match reset::key_status(conn)? {
         KeyStatus::KeyUnavailable => Err(AppError::new(
             "KEY_UNAVAILABLE",
@@ -62,7 +62,7 @@ fn usable_key(conn: &Connection) -> AppResult<Option<crypto::DataKey>> {
     }
 }
 
-fn job_status_of(m: &Matching) -> &'static str {
+pub(crate) fn job_status_of(m: &Matching) -> &'static str {
     if m.p4_ready {
         "READY"
     } else if m.errors > 0 || m.file_reasons.iter().any(|r| r.state == State::Error) {
@@ -73,7 +73,16 @@ fn job_status_of(m: &Matching) -> &'static str {
 }
 
 /// 매칭 결과를 줄 기록으로 남긴다 — 내부 id · 행 번호 · 금액 · 상태 · 코드만.
-fn record(conn: &Connection, job_id: i64, file: &DreamFile, m: &Matching) -> AppResult<()> {
+///
+/// 배분 결과(`after`, 행 번호 → O · P · Q)는 P4 배분이 검산까지 마친 때만 함께 적는다.
+/// 그 밖에는 언제나 비운다 — 다시 검증하면 이전 배분 결과는 남지 않는다.
+pub(crate) fn record(
+    conn: &Connection,
+    job_id: i64,
+    file: &DreamFile,
+    m: &Matching,
+    after: Option<&HashMap<u32, (i64, i64, i64)>>,
+) -> AppResult<()> {
     job::clear_rows(conn, job_id)?;
     let by_row: HashMap<u32, &crate::domain::dream_file::DreamRow> = file.rows.iter().map(|r| (r.source_row, r)).collect();
     for s in &m.students {
@@ -106,7 +115,7 @@ fn record(conn: &Connection, job_id: i64, file: &DreamFile, m: &Matching) -> App
                         (Some(o), Some(p), Some(q)) => Some((o, p, q)),
                         _ => None,
                     }),
-                    after: None,
+                    after: after.and_then(|a| a.get(&l.source_row).copied()),
                     match_status: status.to_string(),
                     reason_code: reason.to_string(),
                 },
@@ -117,7 +126,7 @@ fn record(conn: &Connection, job_id: i64, file: &DreamFile, m: &Matching) -> App
 }
 
 fn finish(conn: &Connection, job_id: i64, file: &DreamFile, m: Matching) -> AppResult<Session> {
-    record(conn, job_id, file, &m)?;
+    record(conn, job_id, file, &m, None)?;
     let st = job_status_of(&m);
     job::set_status(conn, job_id, st, None)?;
     job::add_event(
@@ -174,7 +183,7 @@ pub fn start(
 
 /// 작업이 아직 쓸 수 있는가 — 파일 · 정산이 작업을 만들 때 그대로인가.
 /// 어긋나면 작업을 FAILED 로 닫고 오류를 돌려준다(호출하는 쪽이 커밋해야 기록이 남는다).
-fn check_job(conn: &Connection, job_id: i64, bytes: &[u8]) -> AppResult<job::JobHead> {
+pub(crate) fn check_job(conn: &Connection, job_id: i64, bytes: &[u8]) -> AppResult<job::JobHead> {
     let head = job::get(conn, job_id)?;
     if !matches!(head.status.as_str(), "OPEN" | "BLOCKED" | "READY") {
         return Err(AppError::invalid("끝난 작업입니다. 매칭 및 검증을 다시 시작해 주세요."));

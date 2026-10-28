@@ -3,14 +3,18 @@ import { describe, expect, it } from 'vitest'
 import type { DreamIssue } from '@/ipc/types'
 
 import {
+  allocIssueText,
   cellText,
   DREAM_HEADERS,
   issueText,
   matchStateLabel,
   monthCode,
   monthLabel,
+  move,
+  prioritySourceLabel,
   reasonText,
   statusLabel,
+  transferDateCode,
 } from './dream'
 
 const issue = (o: Partial<DreamIssue>): DreamIssue => ({
@@ -74,5 +78,41 @@ describe('방과후드림 매칭 문장', () => {
     )
     expect(reasonText({ code: 'NEW_CODE', state: 'ERROR', row: null, detail: null })).toBe('알 수 없는 문제(NEW_CODE)')
     expect(matchStateLabel('NEEDS_CONFIRMATION')).toBe('확인 필요')
+  })
+})
+
+describe('방과후드림 배분 (P4)', () => {
+  it('이체예정일은 실제 날짜만 YYYYMMDD 로', () => {
+    expect(transferDateCode('2026-10-28')).toBe('20261028')
+    expect(transferDateCode('2028-02-29')).toBe('20280229')
+    expect(transferDateCode('2026-02-30')).toBeNull()
+    expect(transferDateCode('2026-13-01')).toBeNull()
+    expect(transferDateCode('')).toBeNull()
+    expect(transferDateCode('20261028')).toBeNull()
+  })
+
+  it('차례는 한 칸씩 옮기고 끝에서는 그대로', () => {
+    expect(move([1, 2, 3], 1, -1)).toEqual([2, 1, 3])
+    expect(move([1, 2, 3], 1, 1)).toEqual([1, 3, 2])
+    expect(move([1, 2, 3], 0, -1)).toEqual([1, 2, 3])
+    expect(move([1, 2, 3], 2, 1)).toEqual([1, 2, 3])
+    const src = [1, 2]
+    move(src, 0, 1)
+    expect(src).toEqual([1, 2])
+  })
+
+  it('정책이 바뀐 문장 — 강좌명은 참고, 파일에 없는 학생은 오류', () => {
+    expect(reasonText({ code: 'COURSE_NAME_DIFFERS', state: 'READY', row: null, detail: '로봇과학 B · 로봇과학B' })).toContain(
+      '참고만',
+    )
+    expect(
+      reasonText({ code: 'SETTLEMENT_STUDENT_NOT_IN_FILE', state: 'ERROR', row: null, detail: '1명 · 20000원' }),
+    ).toContain('최신 정산에 금액이 남아 있지만 결제파일에 없는 학생')
+    expect(allocIssueText({ code: 'ALLOCATION_STALE', row: null, detail: null })).toContain('[배분 계산]')
+    expect(allocIssueText({ code: 'ALLOC_TOTAL_MISMATCH', row: 5, detail: null })).toBe(
+      'Excel 5행 학생: 학생의 파일 합계가 정산 총액과 다릅니다.',
+    )
+    expect(allocIssueText({ code: 'X', row: null, detail: null })).toBe('알 수 없는 문제(X)')
+    expect(prioritySourceLabel('SETTLEMENT')).toBe('기존 정산 순위(기본값)')
   })
 })

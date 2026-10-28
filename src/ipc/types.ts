@@ -1206,7 +1206,21 @@ export interface DreamMatching {
   ready: number
   needsConfirmation: number
   errors: number
+  /** 최신 정산에 금액이 남았는데 파일에 없는 학생(취소 포함) */
+  absent: DreamAbsentStudent[]
+  /** 파일 ΣN */
+  fileTotal: number
+  /** 최신 정산 전체 T */
+  settlementTotal: number
   p4Ready: boolean
+}
+
+export interface DreamAbsentStudent {
+  studentId: number
+  label: string
+  total: number
+  cancelled: boolean
+  depts: string[]
 }
 
 export interface DreamSession {
@@ -1214,4 +1228,78 @@ export interface DreamSession {
   /** OPEN(확인 필요) · BLOCKED(오류) · READY(모두 준비 완료) · FAILED */
   jobStatus: string
   matching: DreamMatching
+}
+
+// ─────────────────────────────────────────────── 방과후드림 P4 — 우선순위 · 배분
+
+/** DREAM(방과후드림 순위) · SETTLEMENT(기존 정산 순위를 기본값으로) · DEFAULT(정해진 차례) */
+export type DreamPrioritySource = 'DREAM' | 'SETTLEMENT' | 'DEFAULT'
+
+export interface DreamPriorityDept {
+  departmentId: number
+  label: string
+  inUse: boolean
+  itemSource: DreamPrioritySource
+  items: { code: string; name: string }[]
+}
+
+export interface DreamPriorityView {
+  deptSource: DreamPrioritySource
+  /** 배분할 차례대로 */
+  departments: DreamPriorityDept[]
+  digest: string
+}
+
+/** n = 정산금액(T) · o = 개인부담 · p = 이용권 · q = 자유수강권 */
+export interface DreamTotals {
+  n: number
+  o: number
+  p: number
+  q: number
+}
+
+export interface DreamAllocLine {
+  sourceRow: number
+  seq: number
+  departmentId: number
+  deptLabel: string
+  itemCode: string
+  itemName: string
+  amountN: number
+  /** 원본 O · P · Q */
+  before: [number, number, number]
+  /** 새 O · P · Q */
+  after: [number, number, number]
+}
+
+export interface DreamAllocStudent {
+  key: number
+  studentId: number
+  studentLabel: string
+  amount: DreamStudentAmount
+  before: DreamTotals
+  after: DreamTotals
+  lines: DreamAllocLine[]
+  order: { label: string; items: string[] }[]
+}
+
+export interface DreamAllocIssue {
+  code: string
+  row: number | null
+  detail: string | null
+}
+
+export interface DreamAllocation {
+  jobId: number
+  jobStatus: string
+  /** DONE(배분 검증 완료) · NOT_READY · FAILED · STALE(다시 계산 필요) */
+  status: 'DONE' | 'NOT_READY' | 'FAILED' | 'STALE'
+  issues: DreamAllocIssue[]
+  session: DreamSession | null
+  students: DreamAllocStudent[]
+  before: DreamTotals
+  after: DreamTotals
+  settlement: DreamTotals
+  priorityDigest: string
+  fingerprint: string | null
 }

@@ -1,5 +1,5 @@
 /**
- * 방과후드림 결제관리 — 화면 문장 (P2).
+ * 방과후드림 결제관리 — 화면 문장 (P2 검사 · P3 매칭 · P4 배분).
  *
  * 규칙은 Rust(`domain::dream_file`)에 있고, 화면은 그 결과의 **코드**를 사람이 읽는
  * 문장으로 바꾸기만 한다. 같은 코드면 언제나 같은 문장이 나온다.
@@ -8,7 +8,14 @@
  * 그 값은 들어오지 않는다.
  */
 
-import type { DreamIssue, DreamMatchState, DreamReason, DreamStatus } from '@/ipc/types'
+import type {
+  DreamAllocIssue,
+  DreamIssue,
+  DreamMatchState,
+  DreamPrioritySource,
+  DreamReason,
+  DreamStatus,
+} from '@/ipc/types'
 
 /** 결제파일 A~R 머리글. 서버의 `HEADERS` 와 같은 차례. */
 export const DREAM_HEADERS = [
@@ -135,8 +142,11 @@ export function matchStateLabel(s: DreamMatchState): string {
 const REASON: Record<string, (r: DreamReason) => string> = {
   SETTLEMENT_NOT_FRESH: (r) => `정산이 최신이 아닙니다. ${r.detail ?? ''}`,
   BUDGET_CROSSCHECK_FAILED: () => '정산 결과와 지원금 기록이 맞지 않습니다. 정산을 다시 만들어 주세요.',
-  SETTLED_STUDENT_NOT_IN_FILE: (r) =>
-    `정산에는 있지만 이 파일에 없는 학생이 ${r.detail ?? ''}명 있습니다(참고 — 그 학생 결제는 이 파일로 나가지 않습니다).`,
+  SETTLEMENT_STUDENT_NOT_IN_FILE: (r) =>
+    `최신 정산에 금액이 남아 있지만 결제파일에 없는 학생이 있습니다(${r.detail ?? ''}). 취소한 학생도 남은 금액이 있으면 파일에 있어야 합니다.`,
+  FILE_TOTAL_MISMATCH: (r) => `파일 전체 정산금액 합계가 최신 정산 전체와 다릅니다(${r.detail ?? ''}).`,
+  SETTLEMENT_CHARGE_TOTAL_MISMATCH: (r) =>
+    `정산 전체 금액이 Charge 합계와 다릅니다(${r.detail ?? ''}). 정산을 다시 만들어 주세요.`,
   STUDENT_INFO_INCONSISTENT: () => '같은 개인참조번호의 줄들끼리 학년 · 반 · 번호 · 이름 · 생년월일이 서로 다릅니다.',
   STUDENT_REF_NOT_REGISTERED: () => '개인참조번호가 아직 등록되지 않았습니다. 후보 학생이 맞는지 확인해 주세요.',
   STUDENT_REF_CONFLICT: () => '이 학생에게는 이미 다른 개인참조번호가 등록되어 있습니다. 자동으로 옮기지 않습니다.',
@@ -151,7 +161,7 @@ const REASON: Record<string, (r: DreamReason) => string> = {
   STUDENT_BIRTH_NOT_REGISTERED: () => '생년월일이 아직 등록되지 않았습니다. 확인 후 등록해 주세요.',
   STUDENT_NOT_CONFIRMED: () => '학생이 정해지지 않아 금액을 맞대어 보지 못했습니다.',
   COURSE_MAP_MISSING: () => '강좌명코드가 아직 부서에 연결되지 않았습니다.',
-  COURSE_NAME_MISMATCH: (r) => `강좌명이 연결된 부서 이름과 다릅니다(${r.detail ?? ''}).`,
+  COURSE_NAME_DIFFERS: (r) => `강좌명 표기가 연결된 부서 이름과 다릅니다(${r.detail ?? ''}). 참고만 — 확정한 강좌코드 연결을 따릅니다.`,
   COURSE_NAME_INCONSISTENT: (r) => `같은 강좌명코드에 강좌명이 여럿입니다(${r.detail ?? ''}).`,
   ENROLLMENT_NOT_FOUND: () => '이 학생은 이 부서를 수강하지 않습니다.',
   ENROLLMENT_AMBIGUOUS: () => '이 부서에 정산된 수강이 여럿이라 하나를 고를 수 없습니다.',
@@ -167,4 +177,53 @@ const REASON: Record<string, (r: DreamReason) => string> = {
 export function reasonText(r: DreamReason): string {
   const body = REASON[r.code]?.(r) ?? `알 수 없는 문제(${r.code})`
   return r.row ? `Excel ${r.row}행: ${body}` : body
+}
+
+// ─────────────────────────────────────────────── 배분 (P4)
+
+const ALLOC: Record<string, (i: DreamAllocIssue) => string> = {
+  P3_NOT_READY: () => '매칭 및 검증이 모두 준비 완료가 아니어서 배분하지 않았습니다. 위의 문제를 먼저 해결해 주세요.',
+  ALLOCATION_STALE: () => '저장된 배분 결과가 지금 자료 · 우선순위와 맞지 않습니다. [배분 계산]을 다시 해 주세요.',
+  ALLOC_INTERNAL_INCONSISTENT: () => '검증을 마친 자료에 배분에 필요한 값이 없습니다(내부 오류).',
+  ALLOC_SETTLEMENT_STUDENT_MISSING: (i) => `정산에 금액이 남은 학생 ${i.detail ?? ''}명이 배분 대상에 없습니다.`,
+  ALLOC_NEGATIVE_AMOUNT: () => '음수 금액이 있어 배분하지 않았습니다.',
+  ALLOC_TARGET_INCONSISTENT: () => '정산 총액이 이용권 + 자유수강권 + 개인부담과 다릅니다.',
+  ALLOC_TOTAL_MISMATCH: () => '학생의 파일 합계가 정산 총액과 다릅니다.',
+  ALLOC_DUPLICATE_ROW: () => '같은 행이 두 번 들어 있습니다.',
+  ALLOC_VOUCHER_LEFT: () => '이용권 지원액을 파일 금액 안에 모두 담지 못했습니다.',
+  ALLOC_FREE_LEFT: () => '자유수강권 지원액을 파일 금액 안에 모두 담지 못했습니다.',
+  ALLOC_ROW_SET_MISMATCH: () => '배분 결과의 줄이 파일 줄과 다릅니다.',
+  ALLOC_ROW_SUM_MISMATCH: () => '어떤 줄에서 정산금액 ≠ 개인부담 + 이용권 + 자유수강권입니다.',
+  ALLOC_VOUCHER_SUM_MISMATCH: () => '이용권 합계가 정산 이용권과 다릅니다.',
+  ALLOC_FREE_SUM_MISMATCH: () => '자유수강권 합계가 정산 자유수강권과 다릅니다.',
+  ALLOC_PERSONAL_SUM_MISMATCH: () => '개인부담 합계가 정산 개인부담과 다릅니다.',
+  ALLOC_FILE_SUM_MISMATCH: (i) => `파일 전체 배분 합계가 정산 전체와 다릅니다(${i.detail ?? ''}).`,
+}
+
+export function allocIssueText(i: DreamAllocIssue): string {
+  const body = ALLOC[i.code]?.(i) ?? `알 수 없는 문제(${i.code})`
+  return i.row ? `Excel ${i.row}행 학생: ${body}` : body
+}
+
+export function prioritySourceLabel(s: DreamPrioritySource): string {
+  return s === 'DREAM' ? '방과후드림 순위' : s === 'SETTLEMENT' ? '기존 정산 순위(기본값)' : '정해진 차례(기본값)'
+}
+
+/** 목록에서 한 칸 위(-1) · 아래(+1)로. 끝이면 그대로. */
+export function move<T>(list: T[], index: number, by: -1 | 1): T[] {
+  const to = index + by
+  if (to < 0 || to >= list.length) return list
+  const out = list.slice()
+  ;[out[index], out[to]] = [out[to], out[index]]
+  return out
+}
+
+/** 날짜 선택기 값(`YYYY-MM-DD`) → 결과 파일 R열 값(`YYYYMMDD`). 실제 날짜가 아니면 null. */
+export function transferDateCode(v: string): string | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(v)
+  if (!m) return null
+  const [y, mo, d] = [Number(m[1]), Number(m[2]), Number(m[3])]
+  const dt = new Date(Date.UTC(y, mo - 1, d))
+  if (dt.getUTCFullYear() !== y || dt.getUTCMonth() !== mo - 1 || dt.getUTCDate() !== d) return null
+  return `${m[1]}${m[2]}${m[3]}`
 }

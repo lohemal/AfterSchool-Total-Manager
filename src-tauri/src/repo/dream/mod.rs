@@ -18,7 +18,9 @@
 //! | `reset` | 개인정보 키 상태 · 초기화 (P2) |
 //! | `matching` | 학생 · 강좌 · 항목 · 금액 정확 매칭, 학생 단위 판정 (P3) |
 //! | `session` | 매칭 · 검증 작업 시작 · 다시 검증 · 확인 (P3) |
+//! | `allocation` | 방과후드림 우선순위 화면 · 지원금 재배분 · 검산 · 결과 무효화 (P4) |
 
+pub mod allocation;
 pub mod amount;
 pub mod course;
 pub mod file_check;

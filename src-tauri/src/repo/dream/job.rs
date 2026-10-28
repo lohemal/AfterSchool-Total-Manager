@@ -201,3 +201,53 @@ pub fn clear_rows(conn: &Connection, job_id: i64) -> AppResult<()> {
     conn.execute("DELETE FROM dream_job_row WHERE job_id = ?1", params![job_id])?;
     Ok(())
 }
+
+/// 이 작업공간에서 아직 끝나지 않은 작업의 배분 결과(after)를 비운다 — 우선순위를 바꿨을 때.
+/// 돌려주는 값은 결과가 있었던 작업 id 들. 그 작업마다 무효로 했다는 기록을 남긴다.
+pub fn clear_after(conn: &Connection, workspace_id: i64, why: &str) -> AppResult<Vec<i64>> {
+    let ids: Vec<i64> = conn
+        .prepare(
+            "SELECT DISTINCT r.job_id FROM dream_job_row r JOIN dream_job j ON j.id = r.job_id
+              WHERE j.workspace_id = ?1 AND j.status IN ('OPEN', 'BLOCKED', 'READY')
+                AND (r.after_o IS NOT NULL OR r.after_p IS NOT NULL OR r.after_q IS NOT NULL)
+              ORDER BY r.job_id",
+        )?
+        .query_map(params![workspace_id], |r| r.get(0))?
+        .collect::<rusqlite::Result<_>>()?;
+    for id in &ids {
+        conn.execute(
+            "UPDATE dream_job_row SET after_o = NULL, after_p = NULL, after_q = NULL WHERE job_id = ?1",
+            params![id],
+        )?;
+        add_event(conn, *id, "ALLOCATION_INVALIDATED", why)?;
+    }
+    Ok(ids)
+}
+
+/// 가장 최근의 그 종류 기록(`detail`).
+pub fn last_event(conn: &Connection, job_id: i64, kind: &str) -> AppResult<Option<String>> {
+    Ok(conn
+        .query_row(
+            "SELECT detail FROM dream_job_event WHERE job_id = ?1 AND kind = ?2 ORDER BY id DESC LIMIT 1",
+            params![job_id, kind],
+            |r| r.get(0),
+        )
+        .optional()?)
+}
+
+/// 행 번호와 그 줄의 저장된 O · P · Q(하나라도 비었으면 None).
+pub type StoredAfter = (u32, Option<(i64, i64, i64)>);
+
+/// 줄마다 저장된 배분 결과(행 번호 차례).
+pub fn stored_after(conn: &Connection, job_id: i64) -> AppResult<Vec<StoredAfter>> {
+    let mut st = conn.prepare(
+        "SELECT source_row, after_o, after_p, after_q FROM dream_job_row WHERE job_id = ?1 ORDER BY source_row",
+    )?;
+    let rows = st
+        .query_map(params![job_id], |r| {
+            let (o, p, q): (Option<i64>, Option<i64>, Option<i64>) = (r.get(1)?, r.get(2)?, r.get(3)?);
+            Ok((r.get::<_, u32>(0)?, o.zip(p).zip(q).map(|((o, p), q)| (o, p, q))))
+        })?
+        .collect::<rusqlite::Result<_>>()?;
+    Ok(rows)
+}
