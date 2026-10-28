@@ -137,3 +137,90 @@ pub fn dream_reset_identity(db: State<'_, Db>) -> AppResult<DreamReset> {
     let result = db.write(|c| reset::reset_identity(c))?;
     Ok(DreamReset { result, backup })
 }
+
+// ─────────────────────────────────────────────── P3 — 매칭 및 검증
+
+use crate::repo::dream::session::{self, Session};
+
+/// 고른 자리에서 파일을 한 번 읽는다(복사하지 않는다).
+fn read_source(path: &str) -> AppResult<(String, Vec<u8>)> {
+    let p = Path::new(path);
+    let name = p
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .ok_or_else(|| AppError::invalid("파일을 골라 주세요."))?;
+    let size = std::fs::metadata(p)
+        .map_err(|e| AppError::new("FILE_READ_FAILED", "파일을 열지 못했습니다.").detail(e.kind().to_string()))?
+        .len();
+    if size as usize > crate::excel::dream_file::MAX_BYTES {
+        return Err(AppError::invalid("파일이 너무 큽니다."));
+    }
+    let bytes = std::fs::read(p)
+        .map_err(|e| AppError::new("FILE_READ_FAILED", "파일을 읽지 못했습니다.").detail(e.kind().to_string()))?;
+    Ok((name, bytes))
+}
+
+/// 작업이 더는 쓸 수 없게 됐으면(파일 · 정산이 바뀜) 실패로 닫고 그 오류를 돌려준다.
+fn close_if_stale(db: &Db, job_id: i64, e: AppError) -> AppError {
+    if matches!(e.code.as_str(), "FILE_CHANGED" | "SETTLEMENT_CHANGED" | "SETTLEMENT_NOT_FRESH") {
+        let code = e.code.clone();
+        let _ = db.write(|c| session::fail(c, job_id, &code));
+    }
+    e
+}
+
+/// [매칭 및 검증 시작] — 파일 지문 · 정산 FRESH 를 다시 확인하고 처리 이력을 만든다.
+#[tauri::command]
+pub fn dream_start(db: State<'_, Db>, workspace_id: i64, path: String, sha256: String) -> AppResult<Session> {
+    let (name, bytes) = read_source(&path)?;
+    db.write(|c| session::start(c, workspace_id, &name, &bytes, &sha256, env!("CARGO_PKG_VERSION")))
+}
+
+#[tauri::command]
+pub fn dream_revalidate(db: State<'_, Db>, job_id: i64, path: String) -> AppResult<Session> {
+    let (_, bytes) = read_source(&path)?;
+    db.write(|c| session::revalidate(c, job_id, &bytes))
+        .map_err(|e| close_if_stale(&db, job_id, e))
+}
+
+/// 개인참조번호 확인 · 등록(여럿 한꺼번에) → 다시 검증.
+#[tauri::command]
+pub fn dream_confirm_identities(
+    db: State<'_, Db>,
+    job_id: i64,
+    path: String,
+    picks: Vec<(u32, i64)>,
+) -> AppResult<Session> {
+    let (_, bytes) = read_source(&path)?;
+    db.write(|c| {
+        session::confirm_identities(c, job_id, &bytes, &picks)?;
+        session::revalidate(c, job_id, &bytes)
+    })
+    .map_err(|e| close_if_stale(&db, job_id, e))
+}
+
+#[tauri::command]
+pub fn dream_confirm_births(db: State<'_, Db>, job_id: i64, path: String, keys: Vec<u32>) -> AppResult<Session> {
+    let (_, bytes) = read_source(&path)?;
+    db.write(|c| {
+        session::confirm_births(c, job_id, &bytes, &keys)?;
+        session::revalidate(c, job_id, &bytes)
+    })
+    .map_err(|e| close_if_stale(&db, job_id, e))
+}
+
+#[tauri::command]
+pub fn dream_confirm_course(
+    db: State<'_, Db>,
+    job_id: i64,
+    path: String,
+    course_code: String,
+    department_id: i64,
+) -> AppResult<Session> {
+    let (_, bytes) = read_source(&path)?;
+    db.write(|c| {
+        session::confirm_course(c, job_id, &bytes, &course_code, department_id)?;
+        session::revalidate(c, job_id, &bytes)
+    })
+    .map_err(|e| close_if_stale(&db, job_id, e))
+}

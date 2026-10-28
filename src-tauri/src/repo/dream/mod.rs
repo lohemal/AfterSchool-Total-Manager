@@ -16,14 +16,18 @@
 //! | `workspace_setting` | 작업공간별 결제 기준월 (P2) |
 //! | `file_check` | 결제파일 검사 · 읽기 전용 미리보기 (P2) |
 //! | `reset` | 개인정보 키 상태 · 초기화 (P2) |
+//! | `matching` | 학생 · 강좌 · 항목 · 금액 정확 매칭, 학생 단위 판정 (P3) |
+//! | `session` | 매칭 · 검증 작업 시작 · 다시 검증 · 확인 (P3) |
 
 pub mod amount;
 pub mod course;
 pub mod file_check;
 pub mod identity;
 pub mod job;
+pub mod matching;
 pub mod priority;
 pub mod reset;
+pub mod session;
 pub mod setting;
 pub mod workspace_setting;
 

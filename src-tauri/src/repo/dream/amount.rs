@@ -32,7 +32,8 @@ pub struct FreshSettlement {
     pub year_data_version: i64,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct StudentAmount {
     pub student_id: i64,
     /// T

@@ -13,6 +13,7 @@ import type {
   DreamKeyStatus,
   DreamReset,
   DreamSettings,
+  DreamSession,
   RevertPreview,
   BatchResult,
   BillingBatch,
@@ -463,6 +464,18 @@ export const api = {
     invoke<DreamFileCheck>('dream_check_file', { workspaceId, path }),
   dreamKeyStatus: () => invoke<DreamKeyStatus>('dream_key_status'),
   dreamResetIdentity: () => invoke<DreamReset>('dream_reset_identity'),
+
+  // 방과후드림 매칭 · 검증 (P3) — 파일 값은 서버가 고른 자리에서 다시 읽는다
+  dreamStart: (workspaceId: number, path: string, sha256: string) =>
+    invoke<DreamSession>('dream_start', { workspaceId, path, sha256 }),
+  dreamRevalidate: (jobId: number, path: string) =>
+    invoke<DreamSession>('dream_revalidate', { jobId, path }),
+  dreamConfirmIdentities: (jobId: number, path: string, picks: [number, number][]) =>
+    invoke<DreamSession>('dream_confirm_identities', { jobId, path, picks }),
+  dreamConfirmBirths: (jobId: number, path: string, keys: number[]) =>
+    invoke<DreamSession>('dream_confirm_births', { jobId, path, keys }),
+  dreamConfirmCourse: (jobId: number, path: string, courseCode: string, departmentId: number) =>
+    invoke<DreamSession>('dream_confirm_course', { jobId, path, courseCode, departmentId }),
 }
 
 export type { Eligibility, Student, Department, Workspace, Year }

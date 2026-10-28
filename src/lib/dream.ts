@@ -8,7 +8,7 @@
  * 그 값은 들어오지 않는다.
  */
 
-import type { DreamIssue, DreamStatus } from '@/ipc/types'
+import type { DreamIssue, DreamMatchState, DreamReason, DreamStatus } from '@/ipc/types'
 
 /** 결제파일 A~R 머리글. 서버의 `HEADERS` 와 같은 차례. */
 export const DREAM_HEADERS = [
@@ -124,4 +124,47 @@ export function issueText(i: DreamIssue): string {
 export function cellText(col: number, v: string): string {
   if (MONEY_COLS.has(col) && /^\d+$/.test(v)) return Number(v).toLocaleString('ko-KR')
   return v
+}
+
+// ─────────────────────────────────────────────── 매칭 · 검증 (P3)
+
+export function matchStateLabel(s: DreamMatchState): string {
+  return s === 'READY' ? '준비 완료' : s === 'NEEDS_CONFIRMATION' ? '확인 필요' : '오류'
+}
+
+const REASON: Record<string, (r: DreamReason) => string> = {
+  SETTLEMENT_NOT_FRESH: (r) => `정산이 최신이 아닙니다. ${r.detail ?? ''}`,
+  BUDGET_CROSSCHECK_FAILED: () => '정산 결과와 지원금 기록이 맞지 않습니다. 정산을 다시 만들어 주세요.',
+  SETTLED_STUDENT_NOT_IN_FILE: (r) =>
+    `정산에는 있지만 이 파일에 없는 학생이 ${r.detail ?? ''}명 있습니다(참고 — 그 학생 결제는 이 파일로 나가지 않습니다).`,
+  STUDENT_INFO_INCONSISTENT: () => '같은 개인참조번호의 줄들끼리 학년 · 반 · 번호 · 이름 · 생년월일이 서로 다릅니다.',
+  STUDENT_REF_NOT_REGISTERED: () => '개인참조번호가 아직 등록되지 않았습니다. 후보 학생이 맞는지 확인해 주세요.',
+  STUDENT_REF_CONFLICT: () => '이 학생에게는 이미 다른 개인참조번호가 등록되어 있습니다. 자동으로 옮기지 않습니다.',
+  STUDENT_NOT_FOUND: () => '학년 · 반 · 번호 · 이름이 모두 같은 학생이 없습니다.',
+  STUDENT_AMBIGUOUS: () => '후보 학생이 여럿입니다. 어느 학생인지 골라 주세요.',
+  STUDENT_DUPLICATE_IN_FILE: () => '같은 학생이 파일에 다른 개인참조번호로 두 번 나옵니다.',
+  STUDENT_GRADE_MISMATCH: () => '개인참조번호로 찾은 학생과 학년이 다릅니다.',
+  STUDENT_CLASS_MISMATCH: () => '개인참조번호로 찾은 학생과 반이 다릅니다.',
+  STUDENT_NO_MISMATCH: () => '개인참조번호로 찾은 학생과 번호가 다릅니다.',
+  STUDENT_NAME_MISMATCH: () => '개인참조번호로 찾은 학생과 이름이 다릅니다.',
+  STUDENT_BIRTH_MISMATCH: () => '저장된 생년월일과 파일의 생년월일이 다릅니다.',
+  STUDENT_BIRTH_NOT_REGISTERED: () => '생년월일이 아직 등록되지 않았습니다. 확인 후 등록해 주세요.',
+  STUDENT_NOT_CONFIRMED: () => '학생이 정해지지 않아 금액을 맞대어 보지 못했습니다.',
+  COURSE_MAP_MISSING: () => '강좌명코드가 아직 부서에 연결되지 않았습니다.',
+  COURSE_NAME_MISMATCH: (r) => `강좌명이 연결된 부서 이름과 다릅니다(${r.detail ?? ''}).`,
+  COURSE_NAME_INCONSISTENT: (r) => `같은 강좌명코드에 강좌명이 여럿입니다(${r.detail ?? ''}).`,
+  ENROLLMENT_NOT_FOUND: () => '이 학생은 이 부서를 수강하지 않습니다.',
+  ENROLLMENT_AMBIGUOUS: () => '이 부서에 정산된 수강이 여럿이라 하나를 고를 수 없습니다.',
+  ITEM_UNKNOWN: () => '알 수 없는 비용항목입니다.',
+  DUPLICATE_PAYMENT_ROW: (r) => `같은 학생 · 부서 · 항목이 두 줄입니다(${r.detail ?? ''}). 더하지 않습니다.`,
+  CHARGE_MISSING: (r) => `정산에 이 항목 금액이 없습니다(${r.detail ?? ''}).`,
+  CHARGE_AMOUNT_MISMATCH: (r) => `정산금액이 통합 매니저 금액과 다릅니다(${r.detail ?? ''}).`,
+  DB_CHARGE_NOT_IN_FILE: (r) => `정산에 있는 금액이 파일에 없습니다(${r.detail ?? ''}).`,
+  STUDENT_TOTAL_MISMATCH: (r) => `학생의 파일 합계가 정산 총액과 다릅니다(${r.detail ?? ''}).`,
+  CHARGE_SETTLEMENT_MISMATCH: (r) => `Charge 합계가 정산 총액과 다릅니다(${r.detail ?? ''}). 정산을 다시 만들어 주세요.`,
+}
+
+export function reasonText(r: DreamReason): string {
+  const body = REASON[r.code]?.(r) ?? `알 수 없는 문제(${r.code})`
+  return r.row ? `Excel ${r.row}행: ${body}` : body
 }

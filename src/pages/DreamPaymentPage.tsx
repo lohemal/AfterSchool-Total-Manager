@@ -1,5 +1,5 @@
 /**
- * 방과후드림 결제관리 (P2 — 파일 읽기 · 구조 검증 · 작업공간 연결 · 읽기 전용 미리보기).
+ * 방과후드림 결제관리 (P2 — 파일 읽기 · 구조 검증 · 미리보기, P3 — 매칭 및 검증).
  *
  * 이 단계에서는 금액을 배분하거나 파일을 고치지 않는다. 고른 결제파일을 서버가 읽어
  * 검사하고, 화면은 그 결과를 보여 주기만 한다. 규칙은 모두 Rust 에 있다.
@@ -27,6 +27,7 @@ import {
   statusLabel,
 } from '@/lib/dream'
 import { useApp } from '@/lib/useApp'
+import { DreamMatchPanel } from '@/pages/DreamMatchPanel'
 
 /** 줄 문제는 이만큼만 한꺼번에 그린다 — 수백 개여도 화면이 무겁지 않게 */
 const ISSUE_LIMIT = 200
@@ -108,6 +109,7 @@ export function DreamPaymentPage() {
         <>
           <Issues c={check.data} />
           {check.data.rows.length > 0 && <Preview c={check.data} />}
+          {path && <DreamMatchPanel workspaceId={wsId} path={path} check={check.data} />}
         </>
       )}
     </div>

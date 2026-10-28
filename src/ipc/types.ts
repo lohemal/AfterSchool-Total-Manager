@@ -1113,3 +1113,105 @@ export interface DreamReset {
   /** 초기화 직전 자동백업 이름 */
   backup: string
 }
+
+// ─────────────────────────────────────────────── 방과후드림 매칭 · 검증 (P3)
+
+export type DreamMatchState = 'READY' | 'NEEDS_CONFIRMATION' | 'ERROR'
+
+/** 까닭 하나. `detail` 에는 부서 · 항목 · 금액 · 코드만(개인정보 없음) */
+export interface DreamReason {
+  code: string
+  state: DreamMatchState
+  row: number | null
+  detail: string | null
+}
+
+export interface DreamSuggestion {
+  departmentId: number
+  label: string
+  why: ('SAME_NAME' | 'PREVIOUS_WORKSPACE' | 'STUDENT_ENROLLED')[]
+  /** 다른 강좌코드에 이미 연결된 부서 */
+  taken: boolean
+}
+
+export interface DreamCourseMatch {
+  courseCode: string
+  courseNames: string[]
+  departmentId: number | null
+  deptLabel: string | null
+  state: DreamMatchState
+  reasons: DreamReason[]
+  suggestions: DreamSuggestion[]
+  /** [작업공간 이름, 부서 이름] */
+  previous: [string, string] | null
+  rows: number
+}
+
+export interface DreamLineMatch {
+  sourceRow: number
+  courseCode: string
+  departmentId: number | null
+  deptLabel: string | null
+  itemCode: string | null
+  itemName: string
+  amountN: number
+  /** 정산에 쓰인 Charge(행이 없으면 0). 견줄 수 없었으면 null */
+  charge: number | null
+  enrollmentId: number | null
+  state: DreamMatchState
+  reasons: DreamReason[]
+}
+
+export interface DreamStudentAmount {
+  studentId: number
+  total: number
+  voucher: number
+  freeVoucher: number
+  personal: number
+  selfPay: number
+  voucherOver: number
+}
+
+export interface DreamStudentMatch {
+  /** 첫 행 번호 — 확인 요청에 쓰는 열쇠 */
+  key: number
+  rows: number[]
+  fileName: string
+  fileGrade: string
+  fileClass: string
+  fileNo: string
+  refMasked: string
+  birthMasked: string
+  studentId: number | null
+  studentLabel: string | null
+  refState: 'MATCHED' | 'NOT_REGISTERED' | 'CONFLICT' | 'UNAVAILABLE'
+  birthState: 'MATCHED' | 'NOT_REGISTERED' | 'MISMATCH' | 'UNCHECKED'
+  candidates: { studentId: number; label: string }[]
+  lines: DreamLineMatch[]
+  missing: { departmentId: number; deptLabel: string; itemName: string; amount: number }[]
+  sumN: number
+  /** 원본 [O, P, Q] 합 */
+  before: [number, number, number]
+  amount: DreamStudentAmount | null
+  state: DreamMatchState
+  reasons: DreamReason[]
+}
+
+export interface DreamMatching {
+  settlementId: number | null
+  fileReasons: DreamReason[]
+  courses: DreamCourseMatch[]
+  students: DreamStudentMatch[]
+  departments: { id: number; label: string }[]
+  ready: number
+  needsConfirmation: number
+  errors: number
+  p4Ready: boolean
+}
+
+export interface DreamSession {
+  jobId: number
+  /** OPEN(확인 필요) · BLOCKED(오류) · READY(모두 준비 완료) · FAILED */
+  jobStatus: string
+  matching: DreamMatching
+}

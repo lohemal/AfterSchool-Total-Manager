@@ -1269,3 +1269,747 @@ mod p2 {
         assert_eq!(f.db.read(reset::key_status).unwrap(), KeyStatus::KeyUnavailable);
     }
 }
+
+// ─────────────────────────────────────────────── P3 — 학생 · 강좌 · 항목 · 금액 매칭
+
+mod p3 {
+    use super::*;
+    use crate::excel::dream_fixture::{book, header, s as t, V};
+    use crate::excel::dream_file::SHEET;
+    use crate::repo::dream::matching::{code, Matching, State, StudentMatch};
+    use crate::repo::dream::session::{self, Session};
+    use crate::repo::dream::workspace_setting;
+
+    /// 파일 학생 — (개인참조번호, 학년, 반, 번호, 이름, 생년월일). 모두 가짜.
+    fn who(k: &str) -> (&'static str, &'static str, &'static str, &'static str, &'static str, &'static str) {
+        match k {
+            "A" => ("2024000001", "3학년", "1반", "1", "가온", "170101"),
+            "B" => ("2024000002", "3학년", "1반", "2", "나래", "170202"),
+            "C" => ("2024000003", "3학년", "1반", "3", "다솜", "170303"),
+            "D" => ("2024000004", "3학년", "1반", "4", "라온", "170404"),
+            "I" => ("2024000005", "6학년", "가반", "1", "아라", "140505"),
+            "J" => ("2024000006", "6학년", "가반", "2", "자람", "140606"),
+            _ => unreachable!(),
+        }
+    }
+
+    /// 부서 — (화면 이름, 강좌명코드, [강사료, 수용비, 교재비, 재료비])
+    fn dept(k: &str) -> (&'static str, &'static str, [i64; 4]) {
+        match k {
+            "로봇" => ("로봇과학B", "PGM0001", [35_000, 1_500, 0, 0]),
+            "만화" => ("만화애니메이션B", "PGM0002", [35_000, 1_500, 0, 22_000]),
+            "미술" => ("창의미술B", "PGM0003", [28_000, 1_200, 0, 0]),
+            "공예" => ("토탈공예미니어처B", "PGM0004", [35_000, 1_500, 0, 28_750]),
+            _ => unreachable!(),
+        }
+    }
+
+    const ITEMS4: [(&str, &str); 4] = [("강사료", "01"), ("수용비", "02"), ("교재비", "03"), ("재료비", "04")];
+
+    /// 결제파일 한 줄
+    #[allow(clippy::too_many_arguments)]
+    fn line(st: (&str, &str, &str, &str, &str, &str), course: &str, code_: &str, item: (&str, &str), n: i64) -> Vec<V> {
+        vec![
+            t("2026"),
+            t("I100000987"),
+            t(st.0),
+            t(st.1),
+            t(st.2),
+            t(st.3),
+            t(st.4),
+            t(st.5),
+            V::N(202610.0),
+            t(course),
+            t(code_),
+            t(item.0),
+            t(item.1),
+            V::N(n as f64),
+            V::N(n as f64),
+            V::N(0.0),
+            V::N(0.0),
+            V::None,
+        ]
+    }
+
+    /// 학생 × 부서의 네 줄(0원 항목 포함 — 실제 파일처럼)
+    fn four(k: &str, d: &str) -> Vec<Vec<V>> {
+        let (label, c, fees) = dept(d);
+        ITEMS4.iter().zip(fees).map(|(it, n)| line(who(k), label, c, *it, n)).collect()
+    }
+
+    fn xlsx(rows: Vec<Vec<V>>) -> Vec<u8> {
+        let mut all = vec![header()];
+        all.extend(rows);
+        book(&[(SHEET, all)], Some(200))
+    }
+
+    /// F::mixed 의 모든 수강 그대로의 파일
+    fn full_rows() -> Vec<Vec<V>> {
+        let mut r = Vec::new();
+        for (k, d) in [("A", "로봇"), ("B", "만화"), ("C", "미술"), ("D", "공예"), ("I", "로봇"), ("J", "로봇")] {
+            r.extend(four(k, d));
+        }
+        r
+    }
+
+    fn setup(f: &F) {
+        f.db.write(|c| setting::set_org_code(c, "I100000987")).unwrap();
+        f.db.write(|c| workspace_setting::set_billing_month(c, f.ws, "202610")).unwrap();
+    }
+
+    fn start(f: &F, bytes: &[u8]) -> Session {
+        let sha = crypto::sha256_hex(bytes);
+        f.db.write(|c| session::start(c, f.ws, "결제.xlsx", bytes, &sha, "0.1.10")).unwrap()
+    }
+
+    fn courses_all(f: &F, s: &Session, bytes: &[u8]) -> Session {
+        let mut last = None;
+        for d in ["로봇", "만화", "미술", "공예"] {
+            let code_ = dept(d).1;
+            let id = f.dp[d];
+            if !s.matching.courses.iter().any(|c| c.course_code == code_) {
+                continue;
+            }
+            last = Some(
+                f.db.write(|c| {
+                    session::confirm_course(c, s.job_id, bytes, code_, id)?;
+                    session::revalidate(c, s.job_id, bytes)
+                })
+                .unwrap(),
+            );
+        }
+        last.expect("강좌가 하나는 있다")
+    }
+
+    fn identities_all(f: &F, s: &Session, bytes: &[u8]) -> Session {
+        let picks: Vec<(u32, i64)> = s
+            .matching
+            .students
+            .iter()
+            .filter(|x| x.ref_state == "NOT_REGISTERED" && x.candidates.len() == 1)
+            .map(|x| (x.key, x.candidates[0].student_id))
+            .collect();
+        f.db.write(|c| {
+            session::confirm_identities(c, s.job_id, bytes, &picks)?;
+            session::revalidate(c, s.job_id, bytes)
+        })
+        .unwrap()
+    }
+
+    /// 강좌 연결 · 개인참조번호를 모두 확정한 세션
+    fn confirmed(f: &F, bytes: &[u8]) -> Session {
+        let s = start(f, bytes);
+        let s = courses_all(f, &s, bytes);
+        identities_all(f, &s, bytes)
+    }
+
+    fn student<'a>(m: &'a Matching, name: &str) -> &'a StudentMatch {
+        m.students.iter().find(|s| s.file_name == name).expect("파일 학생")
+    }
+
+    fn codes(s: &StudentMatch) -> Vec<&'static str> {
+        let mut v: Vec<&str> = s.reasons.iter().map(|r| r.code).collect();
+        v.extend(s.lines.iter().flat_map(|l| l.reasons.iter().map(|r| r.code)));
+        v.sort_unstable();
+        v.dedup();
+        v
+    }
+
+    // ── 흐름 · 처리 이력
+
+    #[test]
+    fn 시작하면_처리이력이_생기고_기준_정산을_적는다() {
+        let f = F::mixed();
+        setup(&f);
+        let bytes = xlsx(full_rows());
+        let s = start(&f, &bytes);
+        let head = f.db.read(|c| job::get(c, s.job_id)).unwrap();
+        let fresh = f.db.read(|c| amount::fresh_settlement(c, f.ws)).unwrap();
+        assert_eq!(head.settlement_id, Some(fresh.settlement_id));
+        assert_eq!(head.source_sha256, crypto::sha256_hex(&bytes));
+        assert_eq!(s.job_status, "OPEN", "확인할 것이 있다");
+        assert_eq!(cnt(&f.db, &format!("SELECT COUNT(*) FROM dream_job_row WHERE job_id = {}", s.job_id)), 24);
+        assert!(!s.matching.p4_ready);
+        // 지문이 다르면 시작하지 않는다(미리보기 뒤에 파일이 바뀜)
+        let e = f.db.write(|c| session::start(c, f.ws, "결제.xlsx", &bytes, &"0".repeat(64), "0.1.10")).unwrap_err();
+        assert_eq!(e.code, "FILE_CHANGED");
+    }
+
+    #[test]
+    fn 정산이_최신이_아니면_시작하지_않는다() {
+        let mut f = F::mixed();
+        setup(&f);
+        f.dept("바둑", "바둑", "A", vec![fee(강사료, 1)]); // 부서가 늘어 STALE_DATA
+        let bytes = xlsx(full_rows());
+        let sha = crypto::sha256_hex(&bytes);
+        assert!(f.db.write(|c| session::start(c, f.ws, "결제.xlsx", &bytes, &sha, "0.1.10")).is_err());
+        assert_eq!(cnt(&f.db, "SELECT COUNT(*) FROM dream_job"), 0);
+    }
+
+    #[test]
+    fn 모두_확정하면_준비_완료이고_기존_자료는_그대로다() {
+        let f = F::mixed();
+        setup(&f);
+        let before = f.db.read(|c| Ok(fingerprint(c, f.ws))).unwrap();
+        let bytes = xlsx(full_rows());
+        let s0 = start(&f, &bytes);
+        assert!(s0.matching.courses.iter().all(|c| c.state == State::NeedsConfirmation));
+        // 강좌명이 같은 부서를 제안한다
+        let robot = s0.matching.courses.iter().find(|c| c.course_code == "PGM0001").unwrap();
+        assert_eq!(robot.suggestions[0].department_id, f.dp["로봇"]);
+        assert!(robot.suggestions[0].why.contains(&"SAME_NAME"));
+        assert!(robot.suggestions[0].why.contains(&"STUDENT_ENROLLED"));
+        let s = confirmed(&f, &bytes);
+        let m = &s.matching;
+        assert!(m.students.iter().all(|x| x.state == State::Ready), "{:?}", m.students.iter().map(codes).collect::<Vec<_>>());
+        assert!(m.p4_ready);
+        assert_eq!(s.job_status, "READY");
+        // 기준액 — 학생 C: T 29,200 = V 3,400 + 개인부담 25,800
+        let c = student(m, "다솜");
+        let a = c.amount.as_ref().unwrap();
+        assert_eq!((c.sum_n, a.total, a.voucher, a.personal), (29_200, 29_200, 3_400, 25_800));
+        // 0원 항목(교재비)도 정상
+        assert!(c.lines.iter().any(|l| l.item_code == Some(교재비) && l.charge == Some(0) && l.state == State::Ready));
+        // 정산 원본은 그대로
+        assert_eq!(f.db.read(|c| Ok(fingerprint(c, f.ws))).unwrap(), before);
+        assert_eq!(f.state(), "FRESH");
+        // 줄 기록에는 내부 id · 금액 · 상태만
+        let matched = cnt(&f.db, &format!("SELECT COUNT(*) FROM dream_job_row WHERE job_id = {} AND match_status = 'MATCHED' AND student_id IS NOT NULL AND after_o IS NULL", s.job_id));
+        assert_eq!(matched, 24);
+    }
+
+    #[test]
+    fn 우선순위는_매칭_결과를_바꾸지_않는다() {
+        let f = F::mixed();
+        setup(&f);
+        let bytes = xlsx(full_rows());
+        let s1 = confirmed(&f, &bytes);
+        let (robot, art) = (f.dp["로봇"], f.dp["미술"]);
+        f.db.write(|c| {
+            priority::save_dept_order(c, f.ws, &[art, robot])?;
+            priority::save_item_order(c, robot, &[재료비.into(), 강사료.into()])
+        })
+        .unwrap();
+        let s2 = f.db.write(|c| session::revalidate(c, s1.job_id, &bytes)).unwrap();
+        let key = |m: &Matching| serde_json::to_string(&m.students).unwrap();
+        assert_eq!(key(&s1.matching), key(&s2.matching));
+    }
+
+    // ── 학생
+
+    #[test]
+    fn 미등록_학생은_정확한_후보가_하나면_확인_필요다() {
+        let f = F::mixed();
+        setup(&f);
+        let bytes = xlsx(four("A", "로봇"));
+        let s = start(&f, &bytes);
+        let a = student(&s.matching, "가온");
+        assert_eq!(a.state, State::NeedsConfirmation);
+        assert_eq!(a.ref_state, "NOT_REGISTERED");
+        assert_eq!(a.candidates.len(), 1);
+        assert_eq!(a.candidates[0].student_id, f.st["A"]);
+        assert!(codes(a).contains(&code::STUDENT_REF_NOT_REGISTERED));
+        assert_eq!(cnt(&f.db, "SELECT COUNT(*) FROM dream_student_identity"), 0, "확인 전에 저장하지 않는다");
+    }
+
+    #[test]
+    fn 개인참조번호가_맞아도_다른_학생_정보가_다르면_오류다() {
+        // (바꿀 칸, 기대 코드)
+        let cases: [(usize, &str, &str); 5] = [
+            (6, "가온이", code::STUDENT_NAME_MISMATCH),
+            (3, "4학년", code::STUDENT_GRADE_MISMATCH),
+            (4, "2반", code::STUDENT_CLASS_MISMATCH),
+            (5, "9", code::STUDENT_NO_MISMATCH),
+            (7, "180101", code::STUDENT_BIRTH_MISMATCH),
+        ];
+        for (col, v, want) in cases {
+            let f = F::mixed();
+            setup(&f);
+            let good = xlsx(four("A", "로봇"));
+            confirmed(&f, &good); // 개인참조번호 · 생년월일 등록
+            let mut rows = four("A", "로봇");
+            for r in rows.iter_mut() {
+                r[col] = t(v);
+            }
+            let s = start(&f, &xlsx(rows));
+            let a = &s.matching.students[0];
+            assert_eq!(a.ref_state, "MATCHED");
+            assert_eq!(a.state, State::Error, "{want}");
+            assert!(codes(a).contains(&want), "{want}: {:?}", codes(a));
+            assert!(!s.matching.p4_ready);
+        }
+    }
+
+    #[test]
+    fn 후보가_없으면_오류_여럿이면_확인_필요다() {
+        let mut f = F::mixed();
+        setup(&f);
+        let mut rows = four("A", "로봇");
+        for r in rows.iter_mut() {
+            r[6] = t("가 온"); // 띄어쓰기만 달라도 같은 학생이 아니다
+        }
+        let s = start(&f, &xlsx(rows));
+        assert!(codes(&s.matching.students[0]).contains(&code::STUDENT_NOT_FOUND));
+        assert_eq!(s.matching.students[0].state, State::Error);
+
+        // 반 이름이 '1반' 인 학생을 하나 더 — 원래 값 '1반' 과 후보 '1' 이 서로 다른 학생을 가리킨다
+        let twin = f.student("T", 3, "1반", 1, "가온");
+        f.enroll("T", "로봇");
+        f.generate();
+        let s = start(&f, &xlsx(four("A", "로봇")));
+        let a = &s.matching.students[0];
+        assert_eq!(a.state, State::NeedsConfirmation);
+        assert!(codes(a).contains(&code::STUDENT_AMBIGUOUS));
+        let mut ids: Vec<i64> = a.candidates.iter().map(|c| c.student_id).collect();
+        ids.sort_unstable();
+        assert_eq!(ids, vec![f.st["A"], twin]);
+        // 사람이 고르면 그 학생으로 등록된다
+        let bytes = xlsx(four("A", "로봇"));
+        let s = start(&f, &bytes);
+        let s = courses_all(&f, &s, &bytes);
+        let s = f.db.write(|c| {
+            session::confirm_identities(c, s.job_id, &bytes, &[(2, twin)])?;
+            session::revalidate(c, s.job_id, &bytes)
+        })
+        .unwrap();
+        assert_eq!(s.matching.students[0].student_id, Some(twin));
+    }
+
+    #[test]
+    fn 반은_원래_값_또는_후보와_정확히_같아야_한다() {
+        let f = F::mixed();
+        setup(&f);
+        for (raw, ok) in [("1", true), ("1반", true), ("01반", false), ("1 반", false), ("일반", false)] {
+            let mut rows = four("A", "로봇");
+            for r in rows.iter_mut() {
+                r[4] = t(raw);
+            }
+            let s = start(&f, &xlsx(rows));
+            let a = &s.matching.students[0];
+            assert_eq!(a.candidates.len() == 1, ok, "{raw}");
+        }
+    }
+
+    #[test]
+    fn 다른_학년도_학생은_후보가_아니다() {
+        let f = F::mixed();
+        setup(&f);
+        let y2 = f.db.write(|c| repo::year::create_year(c, 2027, "2027학년도")).unwrap();
+        f.db.write(|c| {
+            repo::student::create(
+                c,
+                y2,
+                &StudentInput { grade: 3, class_no: "1".into(), student_no: 9, name: "외부".into(), note: None },
+            )
+        })
+        .unwrap();
+        let mut rows = four("A", "로봇");
+        for r in rows.iter_mut() {
+            r[5] = t("9");
+            r[6] = t("외부");
+        }
+        let s = start(&f, &xlsx(rows));
+        assert!(codes(&s.matching.students[0]).contains(&code::STUDENT_NOT_FOUND));
+    }
+
+    #[test]
+    fn 다른_번호가_이미_있는_학생과_남의_번호는_등록하지_않는다() {
+        let f = F::mixed();
+        setup(&f);
+        let k = f.key();
+        // A 에게 다른 번호가 이미 있다 → 후보여도 충돌
+        f.db.write(|c| identity::set_ref(c, &k, f.st["A"], "9999999999")).unwrap();
+        let bytes = xlsx(four("A", "로봇"));
+        let s = start(&f, &bytes);
+        let a = &s.matching.students[0];
+        assert_eq!((a.ref_state, a.state), ("CONFLICT", State::Error));
+        assert!(f.db.write(|c| session::confirm_identities(c, s.job_id, &bytes, &[(2, f.st["A"])])).is_err());
+        // 파일의 번호(B 의 것)를 이미 B 가 쓰고 있으면 A 로 등록할 수 없다
+        let f = F::mixed();
+        setup(&f);
+        let k = f.key();
+        f.db.write(|c| identity::set_ref(c, &k, f.st["B"], "2024000001")).unwrap();
+        let s = start(&f, &bytes);
+        // 번호로 B 를 찾았지만 B 의 정보와 파일(A)이 다르다 → 오류
+        assert_eq!(s.matching.students[0].ref_state, "MATCHED");
+        assert_eq!(s.matching.students[0].state, State::Error);
+        // 후보가 아닌 학생으로는 등록할 수 없다
+        let f = F::mixed();
+        setup(&f);
+        let s = start(&f, &bytes);
+        let e = f.db.write(|c| session::confirm_identities(c, s.job_id, &bytes, &[(2, f.st["C"])])).unwrap_err();
+        assert_eq!(e.code, "INVALID");
+        assert_eq!(cnt(&f.db, "SELECT COUNT(*) FROM dream_student_identity"), 0);
+    }
+
+    #[test]
+    fn 등록하면_학생_전체를_다시_검증해_준비_완료가_된다() {
+        let f = F::mixed();
+        setup(&f);
+        let bytes = xlsx(four("A", "로봇"));
+        let s = start(&f, &bytes);
+        let s = courses_all(&f, &s, &bytes);
+        assert_eq!(s.matching.students[0].state, State::NeedsConfirmation);
+        let s = identities_all(&f, &s, &bytes);
+        let a = &s.matching.students[0];
+        assert_eq!((a.ref_state, a.birth_state, a.state), ("MATCHED", "MATCHED", State::Ready));
+        // 저장은 암호문으로만
+        let k = f.key();
+        assert_eq!(f.db.read(|c| identity::reveal_birth(c, &k, f.st["A"])).unwrap().unwrap().as_str(), "170101");
+    }
+
+    #[test]
+    fn 생년월일이_없으면_확인_필요고_등록하면_준비_완료다() {
+        let f = F::mixed();
+        setup(&f);
+        let k = f.key();
+        f.db.write(|c| identity::set_ref(c, &k, f.st["A"], "2024000001")).unwrap(); // 생년월일 없이
+        let bytes = xlsx(four("A", "로봇"));
+        let s = start(&f, &bytes);
+        let s = courses_all(&f, &s, &bytes);
+        let a = &s.matching.students[0];
+        assert_eq!((a.birth_state, a.state), ("NOT_REGISTERED", State::NeedsConfirmation));
+        assert!(codes(a).contains(&code::STUDENT_BIRTH_NOT_REGISTERED));
+        let s = f.db.write(|c| {
+            session::confirm_births(c, s.job_id, &bytes, &[2])?;
+            session::revalidate(c, s.job_id, &bytes)
+        })
+        .unwrap();
+        assert_eq!(s.matching.students[0].state, State::Ready);
+    }
+
+    #[test]
+    fn 키를_쓸_수_없으면_시작하지_않는다() {
+        let f = F::mixed();
+        setup(&f);
+        f.key();
+        f.db.write(|c| {
+            c.execute("UPDATE dream_key SET dpapi_blob = randomblob(178)", [])?;
+            Ok(())
+        })
+        .unwrap();
+        let bytes = xlsx(four("A", "로봇"));
+        let sha = crypto::sha256_hex(&bytes);
+        let e = f.db.write(|c| session::start(c, f.ws, "결제.xlsx", &bytes, &sha, "0.1.10")).unwrap_err();
+        assert_eq!(e.code, "KEY_UNAVAILABLE");
+    }
+
+    // ── 강좌
+
+    #[test]
+    fn 확정된_강좌의_이름이_부서와_다르면_오류다() {
+        let f = F::mixed();
+        setup(&f);
+        f.db.write(|c| course::set(c, f.dp["로봇"], "PGM0001")).unwrap();
+        let mut rows = four("A", "로봇");
+        for r in rows.iter_mut() {
+            r[9] = t("로봇과학 B");
+        }
+        let s = start(&f, &xlsx(rows));
+        let c = &s.matching.courses[0];
+        assert_eq!(c.state, State::Error);
+        assert_eq!(c.reasons[0].code, code::COURSE_NAME_MISMATCH);
+        assert_eq!(s.matching.students[0].state, State::Error);
+    }
+
+    #[test]
+    fn 강좌코드가_맞아도_학생이_수강하지_않으면_오류다() {
+        let f = F::mixed();
+        setup(&f);
+        f.db.write(|c| course::set(c, f.dp["미술"], "PGM0003")).unwrap();
+        // A 는 미술을 수강하지 않는다
+        let (label, c_, fees) = dept("미술");
+        let rows: Vec<Vec<V>> = ITEMS4.iter().zip(fees).map(|(it, n)| line(who("A"), label, c_, *it, n)).collect();
+        let s = start(&f, &xlsx(rows));
+        assert!(codes(&s.matching.students[0]).contains(&code::ENROLLMENT_NOT_FOUND));
+    }
+
+    #[test]
+    fn 직전_작업공간의_같은_코드_연결을_제안하고_확정은_사람이_한다() {
+        let mut f = F::mixed();
+        setup(&f);
+        let prev = f.workspace("9월", "2026-09-01", "2026-09-30");
+        let pd = f.dept_in(prev, "9월로봇", "로봇과학", "B", vec![fee(강사료, 1)]);
+        f.db.write(|c| course::set(c, pd, "PGM0001")).unwrap();
+        f.generate(); // 앞 작업공간이 생겨 다시 정산
+        let s = start(&f, &xlsx(four("A", "로봇")));
+        let c = &s.matching.courses[0];
+        assert_eq!(c.state, State::NeedsConfirmation, "제안 ≠ 확정");
+        assert_eq!(c.previous.as_ref().map(|p| p.1.as_str()), Some("로봇과학B"));
+        let sg = c.suggestions.iter().find(|x| x.department_id == f.dp["로봇"]).unwrap();
+        assert!(sg.why.contains(&"PREVIOUS_WORKSPACE"));
+        assert_eq!(f.db.read(|c| course::find(c, f.ws, "PGM0001")).unwrap(), None, "자동 저장하지 않는다");
+    }
+
+    #[test]
+    fn 다른_코드에_이어진_부서와_다른_작업공간_부서는_고를_수_없다() {
+        let mut f = F::mixed();
+        setup(&f);
+        f.db.write(|c| course::set(c, f.dp["로봇"], "PGMXXXX")).unwrap();
+        let bytes = xlsx(four("A", "로봇"));
+        let s = start(&f, &bytes);
+        let sg = s.matching.courses[0].suggestions.iter().find(|x| x.department_id == f.dp["로봇"]).unwrap();
+        assert!(sg.taken);
+        assert!(f.db.write(|c| session::confirm_course(c, s.job_id, &bytes, "PGM0001", f.dp["로봇"])).is_err());
+        let ws2 = f.workspace("11월", "2026-11-01", "2026-11-30");
+        let other = f.dept_in(ws2, "11월", "로봇과학", "B", vec![fee(강사료, 1)]);
+        let e = f.db.write(|c| session::confirm_course(c, s.job_id, &bytes, "PGM0001", other)).unwrap_err();
+        assert_eq!(e.code, "INVALID");
+        let e = f.db.write(|c| session::confirm_course(c, s.job_id, &bytes, "NOPE01", f.dp["미술"])).unwrap_err();
+        assert_eq!(e.code, "INVALID", "파일에 없는 코드");
+    }
+
+    #[test]
+    fn 강좌_연결을_확정하면_그_강좌의_학생_모두를_다시_본다() {
+        let f = F::mixed();
+        setup(&f);
+        let mut rows = four("A", "로봇");
+        rows.extend(four("I", "로봇"));
+        rows.extend(four("J", "로봇"));
+        let bytes = xlsx(rows);
+        let s = start(&f, &bytes);
+        let s = identities_all(&f, &s, &bytes);
+        assert!(s.matching.students.iter().all(|x| x.state == State::NeedsConfirmation));
+        let s = f.db.write(|c| {
+            session::confirm_course(c, s.job_id, &bytes, "PGM0001", f.dp["로봇"])?;
+            session::revalidate(c, s.job_id, &bytes)
+        })
+        .unwrap();
+        assert!(s.matching.students.iter().all(|x| x.state == State::Ready));
+        assert!(s.matching.p4_ready);
+    }
+
+    #[test]
+    fn 부서를_지우면_강좌_연결도_사라지고_다시_확인해야_한다() {
+        let mut f = F::mixed();
+        setup(&f);
+        let spare = f.dept("빈", "바둑", "A", vec![fee(강사료, 1)]);
+        f.db.write(|c| course::set(c, spare, "PGM9999")).unwrap();
+        f.db.write(|c| repo::department::delete_many(c, &[spare])).unwrap();
+        assert_eq!(f.db.read(|c| course::find(c, f.ws, "PGM9999")).unwrap(), None);
+        assert_eq!(f.db.read(|c| Ok(fk_violations(c))).unwrap(), 0);
+    }
+
+    // ── 금액
+
+    #[test]
+    fn 정산금액이_charge_와_다르면_오류고_고쳐_맞추지_않는다() {
+        let f = F::mixed();
+        setup(&f);
+        let mut rows = four("A", "로봇");
+        rows[0][13] = V::N(30_000.0); // 강사료 35,000 → 30,000
+        let bytes = xlsx(rows);
+        let before = f.db.read(|c| Ok(fingerprint(c, f.ws))).unwrap();
+        let s = confirmed(&f, &bytes);
+        let a = &s.matching.students[0];
+        let c = codes(a);
+        assert!(c.contains(&code::CHARGE_AMOUNT_MISMATCH) && c.contains(&code::STUDENT_TOTAL_MISMATCH), "{c:?}");
+        assert_eq!(a.lines[0].charge, Some(35_000));
+        assert_eq!(f.db.read(|c| Ok(fingerprint(c, f.ws))).unwrap(), before, "Charge 를 고쳤다");
+    }
+
+    #[test]
+    fn 영원_줄은_charge_0_이나_charge_없음과_맞고_양수와는_다르다() {
+        let mut f = F::mixed();
+        setup(&f);
+        // 강사료만 넣어 수강을 만든다 — 나머지 항목은 Charge 행이 없다
+        let x = f.student("X", 2, "1", 5, "하늘");
+        let ws = f.ws;
+        let items = f.items.clone();
+        let robot = f.dp["로봇"];
+        f.db.write(|c| {
+            repo::enrollment::create(
+                c,
+                ws,
+                &EnrollmentInput { student_id: x, department_id: robot, fees: vec![fee(강사료, 35_000)], reason: None },
+                &items,
+            )
+        })
+        .unwrap();
+        assert_eq!(cnt(&f.db, &format!("SELECT COUNT(*) FROM charge c JOIN enrollment e ON e.id = c.enrollment_id WHERE e.student_id = {x}")), 1);
+        f.generate();
+        let st = ("2024000099", "2학년", "1반", "5", "하늘", "180505");
+        let mk = |n: [i64; 4]| -> Vec<Vec<V>> { ITEMS4.iter().zip(n).map(|(it, v)| line(st, "로봇과학B", "PGM0001", *it, v)).collect() };
+
+        // N=0 + Charge 없음 → 정상
+        let bytes = xlsx(mk([35_000, 0, 0, 0]));
+        let s = confirmed(&f, &bytes);
+        let h = &s.matching.students[0];
+        assert_eq!(h.state, State::Ready, "{:?}", codes(h));
+        assert_eq!(h.lines[1].charge, Some(0));
+
+        // N>0 + Charge 없음 → 오류
+        let s = start(&f, &xlsx(mk([35_000, 1_500, 0, 0])));
+        assert!(codes(&s.matching.students[0]).contains(&code::CHARGE_MISSING));
+        // N>0 + Charge 0 (A 의 교재비 0원) → 오류
+        let mut rows = four("A", "로봇");
+        rows[2][13] = V::N(500.0);
+        let s = start(&f, &xlsx(rows));
+        assert!(codes(&s.matching.students[0]).contains(&code::CHARGE_MISSING));
+        // N=0 + Charge > 0 → 오류
+        let mut rows = four("A", "로봇");
+        rows[1][13] = V::N(0.0);
+        rows[1][14] = V::N(0.0);
+        let s = start(&f, &xlsx(rows));
+        assert!(codes(&s.matching.students[0]).contains(&code::CHARGE_AMOUNT_MISMATCH));
+    }
+
+    #[test]
+    fn 정산에_있는_양수_charge_가_파일에_없으면_오류다() {
+        let f = F::mixed();
+        setup(&f);
+        let mut rows = four("A", "로봇");
+        rows.remove(1); // 수용비 1,500 줄이 빠졌다
+        let s = confirmed(&f, &xlsx(rows));
+        let a = &s.matching.students[0];
+        assert!(codes(a).contains(&code::DB_CHARGE_NOT_IN_FILE), "{:?}", codes(a));
+        assert_eq!(a.missing.len(), 1);
+        assert_eq!((a.missing[0].item_name.as_str(), a.missing[0].amount), ("수용비", 1_500));
+        assert_eq!(a.state, State::Error);
+    }
+
+    #[test]
+    fn 같은_학생_부서_항목이_두_줄이면_더하지_않고_오류다() {
+        let f = F::mixed();
+        setup(&f);
+        let mut rows = four("A", "로봇");
+        let dup = rows[0].clone();
+        rows.push(dup);
+        let s = confirmed(&f, &xlsx(rows));
+        assert!(codes(&s.matching.students[0]).contains(&code::DUPLICATE_PAYMENT_ROW));
+        assert_eq!(s.matching.students[0].state, State::Error);
+    }
+
+    #[test]
+    fn 취소했어도_정산에_들어간_charge_는_맞대어_본다() {
+        let f = F::mixed();
+        setup(&f);
+        let eid: i64 = cnt(&f.db, &format!("SELECT id FROM enrollment WHERE student_id = {}", f.st["A"]));
+        let items = f.items.clone();
+        // 강사료 20,000 만 남기고 취소
+        f.db.write(|c| {
+            repo::enrollment::cancel(c, eid, Some(&[fee(강사료, 20_000), fee(수용비, 0)]), "시험", &items)
+        })
+        .unwrap();
+        f.generate();
+        let mut rows = four("A", "로봇");
+        rows[0][13] = V::N(20_000.0);
+        rows[0][14] = V::N(20_000.0);
+        rows[1][13] = V::N(0.0);
+        rows[1][14] = V::N(0.0);
+        let s = confirmed(&f, &xlsx(rows));
+        let a = &s.matching.students[0];
+        assert_eq!(a.state, State::Ready, "{:?}", codes(a));
+        assert_eq!(a.amount.as_ref().unwrap().total, 20_000);
+    }
+
+    // ── 학생 단위 · 파일 전체
+
+    #[test]
+    fn 한_줄만_틀려도_그_학생_전체가_준비_완료가_아니다() {
+        let f = F::mixed();
+        setup(&f);
+        // A 가 로봇 · 미술 · 공예를 듣는다
+        f.enroll("A", "미술");
+        f.enroll("A", "공예");
+        f.generate();
+        let mut rows = four("A", "로봇");
+        let mut art = Vec::new();
+        let (label, c_, fees) = dept("미술");
+        for (it, n) in ITEMS4.iter().zip(fees) {
+            art.push(line(who("A"), label, c_, *it, n));
+        }
+        art[0][13] = V::N(1.0); // 미술 강사료만 틀렸다
+        rows.extend(art);
+        let (label, c_, fees) = dept("공예");
+        for (it, n) in ITEMS4.iter().zip(fees) {
+            rows.push(line(who("A"), label, c_, *it, n));
+        }
+        let s = confirmed(&f, &xlsx(rows));
+        let a = &s.matching.students[0];
+        assert_eq!(a.state, State::Error);
+        // 로봇 · 공예 줄은 그 자체로 맞지만, 기록에는 학생 상태(오류)로 남는다
+        assert!(a.lines.iter().filter(|l| l.state == State::Ready).count() >= 8);
+        let rows_ok = cnt(&f.db, &format!("SELECT COUNT(*) FROM dream_job_row WHERE job_id = {} AND match_status = 'MATCHED'", s.job_id));
+        assert_eq!(rows_ok, 0, "오류 학생의 줄이 준비 완료로 남았다");
+        assert!(!s.matching.p4_ready);
+        assert_eq!(s.job_status, "BLOCKED");
+    }
+
+    #[test]
+    fn 파일_전체는_모든_학생이_준비_완료일_때만_다음_단계로_간다() {
+        let f = F::mixed();
+        setup(&f);
+        let mut rows = four("A", "로봇");
+        rows.extend(four("B", "만화"));
+        rows.extend(four("C", "미술"));
+        let bytes = xlsx(rows);
+        let s = start(&f, &bytes);
+        let s = courses_all(&f, &s, &bytes);
+        // A · B 만 확인
+        let picks: Vec<(u32, i64)> = s
+            .matching
+            .students
+            .iter()
+            .filter(|x| x.file_name != "다솜")
+            .map(|x| (x.key, x.candidates[0].student_id))
+            .collect();
+        let s = f.db.write(|c| {
+            session::confirm_identities(c, s.job_id, &bytes, &picks)?;
+            session::revalidate(c, s.job_id, &bytes)
+        })
+        .unwrap();
+        assert_eq!((s.matching.ready, s.matching.needs_confirmation), (2, 1));
+        assert!(!s.matching.p4_ready);
+        assert_eq!(s.job_status, "OPEN");
+        let s = identities_all(&f, &s, &bytes);
+        assert!(s.matching.p4_ready);
+        assert_eq!(s.job_status, "READY");
+    }
+
+    #[test]
+    fn 파일이나_정산이_바뀌면_작업을_계속하지_않는다() {
+        let f = F::mixed();
+        setup(&f);
+        let bytes = xlsx(four("A", "로봇"));
+        let s = start(&f, &bytes);
+        let other = xlsx(four("B", "만화"));
+        assert_eq!(f.db.write(|c| session::revalidate(c, s.job_id, &other)).unwrap_err().code, "FILE_CHANGED");
+        f.generate(); // 다시 정산 — 정산 id 가 바뀐다
+        assert_eq!(f.db.write(|c| session::revalidate(c, s.job_id, &bytes)).unwrap_err().code, "SETTLEMENT_CHANGED");
+        f.db.write(|c| session::fail(c, s.job_id, "SETTLEMENT_CHANGED")).unwrap();
+        assert_eq!(f.db.write(|c| session::revalidate(c, s.job_id, &bytes)).unwrap_err().code, "INVALID", "끝난 작업");
+    }
+
+    #[test]
+    fn 처리_이력과_화면_결과에_개인정보_원문이_없다() {
+        let f = F::mixed();
+        setup(&f);
+        let bytes = xlsx(full_rows());
+        let s = confirmed(&f, &bytes);
+        let json = serde_json::to_string(&s.matching).unwrap();
+        for v in ["2024000001", "170101", "2024000006", "140606"] {
+            assert!(!json.contains(v), "화면 결과에 {v}");
+        }
+        let text: String = f
+            .db
+            .read(|c| {
+                let v: Vec<String> = c
+                    .prepare(
+                        "SELECT group_concat(quote(r.student_id)||quote(r.reason_code)||quote(r.dream_item_code), '|') FROM dream_job_row r
+                         UNION ALL SELECT group_concat(kind||detail, '|') FROM dream_job_event
+                         UNION ALL SELECT group_concat(source_name, '|') FROM dream_job",
+                    )?
+                    .query_map([], |r| r.get::<_, Option<String>>(0))?
+                    .collect::<rusqlite::Result<Vec<_>>>()?
+                    .into_iter()
+                    .flatten()
+                    .collect();
+                Ok(v.join("|"))
+            })
+            .unwrap();
+        for v in ["2024000001", "170101", "가온", "나래"] {
+            assert!(!text.contains(v), "처리 이력에 {v}");
+        }
+    }
+}

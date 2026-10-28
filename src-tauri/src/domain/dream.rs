@@ -180,6 +180,22 @@ pub fn mask_ref(v: &str) -> String {
     s
 }
 
+/// 저장된 생년월일과 파일 H열(`YYMMDD`)이 같은 날인가.
+///
+/// 파일에는 세기가 없으므로 세기를 짐작하지 않는다. 저장값이 `YYYYMMDD` 면 **끝 여섯
+/// 자리**만, `YYMMDD` 면 그대로 견준다. 그 밖의 모양이면 같다고 하지 않는다.
+pub fn birth_matches(stored: &str, file_yymmdd: &str) -> bool {
+    let (s, f) = (stored.trim(), file_yymmdd.trim());
+    if f.len() != 6 || !f.bytes().all(|b| b.is_ascii_digit()) || !s.bytes().all(|b| b.is_ascii_digit()) {
+        return false;
+    }
+    match s.len() {
+        6 => s == f,
+        8 => &s[2..] == f,
+        _ => false,
+    }
+}
+
 /// 화면용 가림 — 생년월일은 앞 두 자리(출생 연도 끝자리)만 보인다.
 pub fn mask_birth(v: &str) -> String {
     let chars: Vec<char> = v.trim().chars().collect();
@@ -295,6 +311,18 @@ mod tests {
         assert_eq!(student_no_of("01"), Some(1));
         for bad in ["0", "", "1a", "1000", "-1"] {
             assert_eq!(student_no_of(bad), None, "{bad}");
+        }
+    }
+
+    #[test]
+    fn 생년월일은_세기를_짐작하지_않고_끝_여섯_자리를_견준다() {
+        assert!(birth_matches("20170305", "170305"));
+        assert!(!birth_matches("20170305", "180305"));
+        assert!(birth_matches("170305", "170305"), "저장이 YYMMDD 면 그대로");
+        assert!(!birth_matches("170305", "180305"));
+        assert!(birth_matches("19170305", "170305"), "세기가 달라도 파일에는 세기가 없다");
+        for (s, f) in [("2017035", "170305"), ("20170305", "20170305"), ("", "170305"), ("2017-03-05", "170305")] {
+            assert!(!birth_matches(s, f), "{s} {f}");
         }
     }
 

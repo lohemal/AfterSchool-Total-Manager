@@ -159,3 +159,45 @@ pub fn cleanup_expired(conn: &Connection, now: &str) -> AppResult<usize> {
         params![cutoff],
     )?)
 }
+
+/// 처리 이력 한 건의 기준값 — 다음 단계로 갈 때 지금 상태와 맞대어 본다.
+#[derive(Debug, Clone)]
+pub struct JobHead {
+    pub id: i64,
+    pub workspace_id: i64,
+    pub status: String,
+    pub source_name: String,
+    pub source_sha256: String,
+    pub settlement_id: Option<i64>,
+    pub ws_data_version: Option<i64>,
+    pub year_data_version: Option<i64>,
+}
+
+pub fn get(conn: &Connection, job_id: i64) -> AppResult<JobHead> {
+    conn.query_row(
+        "SELECT id, workspace_id, status, source_name, source_sha256, settlement_id,
+                ws_data_version, year_data_version
+           FROM dream_job WHERE id = ?1",
+        params![job_id],
+        |r| {
+            Ok(JobHead {
+                id: r.get(0)?,
+                workspace_id: r.get(1)?,
+                status: r.get(2)?,
+                source_name: r.get(3)?,
+                source_sha256: r.get(4)?,
+                settlement_id: r.get(5)?,
+                ws_data_version: r.get(6)?,
+                year_data_version: r.get(7)?,
+            })
+        },
+    )
+    .optional()?
+    .ok_or_else(|| AppError::not_found("처리 이력을 찾지 못했습니다. 매칭 및 검증을 다시 시작해 주세요."))
+}
+
+/// 다시 검증할 때 줄 기록을 통째로 새로 쓴다 — 늘 원본에서 다시 계산한 결과만 남긴다.
+pub fn clear_rows(conn: &Connection, job_id: i64) -> AppResult<()> {
+    conn.execute("DELETE FROM dream_job_row WHERE job_id = ?1", params![job_id])?;
+    Ok(())
+}
