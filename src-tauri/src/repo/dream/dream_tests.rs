@@ -1009,3 +1009,263 @@ fn 학생_부서_작업공간_학년도_지우기가_막히지_않는다() {
 fn cnt(db: &Db, sql: &str) -> i64 {
     db.read(|c| Ok(c.query_row(sql, [], |r| r.get(0))?)).unwrap()
 }
+
+// ─────────────────────────────────────────────── P2 — 결제 기준월 · 파일 검사 · 키 상태 · 초기화
+
+mod p2 {
+    use super::*;
+    use crate::domain::dream_file::code;
+    use crate::excel::dream_fixture::{s, sample_rows, with, V};
+    use crate::repo::dream::reset::{self, KeyStatus};
+    use crate::repo::dream::{file_check, workspace_setting};
+
+    fn ready(f: &F) {
+        f.db.write(|c| setting::set_org_code(c, "I100000987")).unwrap();
+        f.db.write(|c| workspace_setting::set_billing_month(c, f.ws, "202609")).unwrap();
+    }
+
+    fn check(f: &F, bytes: &[u8]) -> file_check::FileCheck {
+        f.db.read(|c| file_check::check(c, f.ws, "방과후드림 결제 파일.xlsx", bytes)).unwrap()
+    }
+
+    fn file_codes(x: &file_check::FileCheck) -> Vec<&'static str> {
+        x.file_issues.iter().map(|i| i.code).collect()
+    }
+
+    #[test]
+    fn 결제_기준월을_저장_수정해도_정산은_그대로다() {
+        let f = F::mixed();
+        let before = f.db.read(|c| Ok(fingerprint(c, f.ws))).unwrap();
+        assert_eq!(f.db.read(|c| workspace_setting::billing_month(c, f.ws)).unwrap(), None);
+        assert_eq!(f.db.write(|c| workspace_setting::set_billing_month(c, f.ws, " 202609 ")).unwrap(), "202609");
+        f.db.write(|c| workspace_setting::set_billing_month(c, f.ws, "202610")).unwrap();
+        assert_eq!(f.db.read(|c| workspace_setting::billing_month(c, f.ws)).unwrap().as_deref(), Some("202610"));
+        for bad in ["202613", "2026-10", "20261", "", "abcdef"] {
+            assert!(f.db.write(|c| workspace_setting::set_billing_month(c, f.ws, bad)).is_err(), "{bad}");
+        }
+        assert!(f.db.write(|c| workspace_setting::set_billing_month(c, 9999, "202609")).is_err());
+        // DB 도 형식을 막는다
+        let e = f.db.write(|c| {
+            c.execute("UPDATE dream_workspace_setting SET billing_month = '202699'", [])?;
+            Ok(())
+        });
+        assert!(e.is_err());
+        assert_eq!(f.db.read(|c| Ok(fingerprint(c, f.ws))).unwrap(), before, "자료판 · 정산이 바뀌었다");
+        assert_eq!(f.state(), "FRESH");
+    }
+
+    #[test]
+    fn 파일_공통값이_작업공간과_맞으면_정상이다() {
+        let f = F::mixed();
+        ready(&f);
+        let x = check(&f, &with(sample_rows()));
+        assert_eq!(x.status, "OK", "{:?}", x.file_issues);
+        assert_eq!((x.data_rows, x.row_error_count), (4, 0));
+        assert_eq!(x.expected_year, 2026);
+        assert_eq!(x.sha256.len(), 64);
+        assert_eq!(x.rows[0].cells[2], "2******001", "화면으로는 가린 값만 간다");
+        assert_eq!(x.rows[0].cells[7], "17****");
+    }
+
+    #[test]
+    fn 회계년도는_작업공간의_학년도와_견준다() {
+        let f = F::mixed();
+        ready(&f);
+        let mut rows = sample_rows();
+        for r in rows.iter_mut() {
+            r[0] = s("2027"); // 달력 연도로 짐작하지 않는다 — 작업공간은 2026학년도
+        }
+        let x = check(&f, &with(rows));
+        assert_eq!(file_codes(&x), vec![code::ACCOUNTING_YEAR_MISMATCH]);
+        assert_eq!(x.file_issues[0].expected.as_deref(), Some("2026"));
+        assert_eq!(x.status, "ERROR");
+    }
+
+    #[test]
+    fn 기관코드와_결제_기준월은_정해져_있고_같아야_한다() {
+        let f = F::mixed();
+        // 둘 다 미설정
+        let x = check(&f, &with(sample_rows()));
+        assert_eq!(file_codes(&x), vec![code::ORG_CODE_NOT_SET, code::BILLING_MONTH_NOT_SET]);
+        // 설정했지만 다르다
+        f.db.write(|c| setting::set_org_code(c, "0024000001")).unwrap();
+        f.db.write(|c| workspace_setting::set_billing_month(c, f.ws, "202610")).unwrap();
+        let x = check(&f, &with(sample_rows()));
+        assert_eq!(file_codes(&x), vec![code::ORG_CODE_MISMATCH, code::BILLING_MONTH_MISMATCH]);
+        assert_eq!(x.file_issues[0].expected.as_deref(), Some("0024000001"), "앞자리 0");
+        assert_eq!(x.file_issues[1].found.as_deref(), Some("202609"));
+        // 맞추면 정상
+        ready(&f);
+        assert_eq!(check(&f, &with(sample_rows())).status, "OK");
+    }
+
+    #[test]
+    fn 줄_오류와_참고는_상태에_다르게_쓰인다() {
+        let f = F::mixed();
+        ready(&f);
+        let mut rows = sample_rows();
+        rows[0][14] = V::N(1.0); // 기존 합 ≠ N — 참고만
+        let x = check(&f, &with(rows));
+        assert_eq!(x.status, "OK");
+        assert_eq!((x.row_error_count, x.row_info_count), (0, 1));
+        let mut rows = sample_rows();
+        rows[1][12] = s("01"); // 수용비 / 01
+        let x = check(&f, &with(rows));
+        assert_eq!(x.status, "ERROR");
+        assert_eq!(x.row_error_count, 1);
+        assert_eq!(x.rows[1].status, "ERROR");
+    }
+
+    #[test]
+    fn 파일을_읽기만_해도_db_는_바뀌지_않는다() {
+        let f = F::mixed();
+        ready(&f);
+        let before = f.db.read(|c| Ok(fingerprint(c, f.ws))).unwrap();
+        let dream = |db: &Db| -> Vec<i64> {
+            [
+                "dream_job",
+                "dream_job_row",
+                "dream_job_event",
+                "dream_key",
+                "dream_student_identity",
+                "dream_workspace_setting",
+            ]
+            .iter()
+            .map(|t| cnt(db, &format!("SELECT COUNT(*) FROM {t}")))
+            .collect()
+        };
+        let d0 = dream(&f.db);
+        for _ in 0..3 {
+            check(&f, &with(sample_rows()));
+            check(&f, b"not a workbook");
+        }
+        assert_eq!(f.db.read(|c| Ok(fingerprint(c, f.ws))).unwrap(), before);
+        assert_eq!(dream(&f.db), d0, "미리보기만으로 처리 이력 · 키가 생겼다");
+        assert_eq!(f.state(), "FRESH");
+    }
+
+    #[test]
+    fn 작업공간을_지우면_결제_기준월도_함께_사라진다() {
+        let f = F::mixed();
+        let ws2 = f.workspace("11월", "2026-11-01", "2026-11-30");
+        f.db.write(|c| workspace_setting::set_billing_month(c, ws2, "202611")).unwrap();
+        f.db.write(|c| repo::year::delete_workspace(c, ws2)).unwrap();
+        assert_eq!(cnt(&f.db, "SELECT COUNT(*) FROM dream_workspace_setting"), 0);
+        assert_eq!(f.db.read(|c| Ok(fk_violations(c))).unwrap(), 0);
+    }
+
+    // ── 키 상태 · 초기화
+
+    /// 다른 PC 로 옮긴 DB 흉내 — 감싼 키 사본을 이 PC 에서 풀리지 않는 바이트로 바꾼다.
+    fn break_key(f: &F) {
+        f.db.write(|c| {
+            c.execute("UPDATE dream_key SET dpapi_blob = randomblob(178)", [])?;
+            Ok(())
+        })
+        .unwrap();
+    }
+
+    /// 개인정보 · 설정을 채운 작업공간.
+    fn with_identity() -> F {
+        let f = F::mixed();
+        let k = f.key();
+        let (a, robot) = (f.st["A"], f.dp["로봇"]);
+        f.db.write(|c| {
+            identity::set_ref(c, &k, a, "I100000987")?;
+            identity::set_birth(c, &k, f.st["B"], "170806")?;
+            course::set(c, robot, "20260818PGM000003317")?;
+            priority::save_dept_order(c, f.ws, &[robot])?;
+            priority::save_item_order(c, robot, &[재료비.into()])?;
+            setting::set_org_code(c, "2024000001")?;
+            workspace_setting::set_billing_month(c, f.ws, "202609")?;
+            Ok(())
+        })
+        .unwrap();
+        f
+    }
+
+    #[test]
+    fn 키_상태는_없음_준비_사용불가로_가른다() {
+        let f = F::mixed();
+        assert_eq!(f.db.read(reset::key_status).unwrap(), KeyStatus::NotInitialized);
+        f.key();
+        assert_eq!(f.db.read(reset::key_status).unwrap(), KeyStatus::Ready);
+        break_key(&f);
+        assert_eq!(f.db.read(reset::key_status).unwrap(), KeyStatus::KeyUnavailable);
+        // 키를 쓸 수 없어도 다른 기능은 그대로다
+        assert!(f.db.read(|c| amount::workspace_amounts(c, f.ws)).is_ok());
+        f.db.write(|c| setting::set_org_code(c, "2024000009")).unwrap();
+        assert_eq!(f.state(), "FRESH");
+    }
+
+    #[test]
+    fn 쓸_수_있는_키는_초기화하지_않는다() {
+        let f = with_identity();
+        let e = f.db.write(|c| reset::reset_identity(c)).unwrap_err();
+        assert_eq!(e.code, "INVALID");
+        assert_eq!(cnt(&f.db, "SELECT COUNT(*) FROM dream_student_identity"), 2);
+        let f = F::mixed();
+        assert!(f.db.write(|c| reset::reset_identity(c)).is_err(), "키가 없을 때도 하지 않는다");
+    }
+
+    #[test]
+    fn 초기화하면_개인정보만_지우고_새_키로_다시_등록할_수_있다() {
+        let f = with_identity();
+        let key_of = |db: &Db| -> String {
+            db.read(|c| Ok(c.query_row("SELECT key_id FROM dream_key", [], |r| r.get(0))?)).unwrap()
+        };
+        let old_key = key_of(&f.db);
+        break_key(&f);
+        let before = f.db.read(|c| Ok(fingerprint(c, f.ws))).unwrap();
+        let keep = |db: &Db| -> Vec<i64> {
+            ["dream_course_map", "dream_dept_priority", "dream_item_priority", "dream_workspace_setting"]
+                .iter()
+                .map(|t| cnt(db, &format!("SELECT COUNT(*) FROM {t}")))
+                .collect()
+        };
+        let kept = keep(&f.db);
+
+        let r = f.db.write(|c| reset::reset_identity(c)).unwrap();
+        assert_eq!((r.removed_identities, r.removed_keys), (2, 1));
+        assert_eq!(f.db.read(reset::key_status).unwrap(), KeyStatus::Ready);
+        assert_eq!(cnt(&f.db, "SELECT COUNT(*) FROM dream_student_identity"), 0);
+        assert_eq!(cnt(&f.db, "SELECT COUNT(*) FROM dream_key"), 1);
+        let new_key = key_of(&f.db);
+        assert_ne!(new_key, old_key);
+        assert_eq!(keep(&f.db), kept, "강좌 매핑 · 우선순위 · 결제 기준월이 지워졌다");
+        assert_eq!(f.db.read(setting::org_code).unwrap().as_deref(), Some("2024000001"));
+        assert_eq!(f.db.read(|c| Ok(fingerprint(c, f.ws))).unwrap(), before, "학생 · 정산 · 자료판이 바뀌었다");
+        assert_eq!(f.state(), "FRESH");
+
+        // 새 키로 다시 등록된다
+        let k = f.key();
+        assert_eq!(k.key_id, new_key);
+        f.db.write(|c| identity::set_ref(c, &k, f.st["A"], "I100000987")).unwrap();
+        assert_eq!(f.db.read(|c| identity::find_by_ref(c, &k, f.year, "I100000987")).unwrap(), Some(f.st["A"]));
+    }
+
+    #[test]
+    fn 초기화_도중_실패하면_아무것도_지우지_않는다() {
+        let f = with_identity();
+        break_key(&f);
+        let snapshot = |db: &Db| -> (i64, String) {
+            (
+                cnt(db, "SELECT COUNT(*) FROM dream_student_identity"),
+                db.read(|c| Ok(c.query_row("SELECT key_id || hex(dpapi_blob) FROM dream_key", [], |r| r.get(0))?))
+                    .unwrap(),
+            )
+        };
+        let before = snapshot(&f.db);
+        // 새 키를 넣는 순간 실패하게 만든다(디스크 · DB 오류 흉내)
+        f.db.write(|c| {
+            c.execute_batch(
+                "CREATE TEMP TRIGGER zz_fail BEFORE INSERT ON dream_key BEGIN SELECT RAISE(ABORT, 'zz'); END;",
+            )?;
+            Ok(())
+        })
+        .unwrap();
+        assert!(f.db.write(|c| reset::reset_identity(c)).is_err());
+        assert_eq!(snapshot(&f.db), before, "반쪽만 지워진 상태가 남았다");
+        assert_eq!(f.db.read(reset::key_status).unwrap(), KeyStatus::KeyUnavailable);
+    }
+}

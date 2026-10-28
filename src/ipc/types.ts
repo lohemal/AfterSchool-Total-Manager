@@ -1044,3 +1044,72 @@ export interface RevertPreview {
   additionalTotal: number
   blocked: boolean
 }
+
+// ─────────────────────────────────────────────── 방과후드림 결제관리 (P2)
+
+/** 개인정보 암호 키 상태 */
+export type DreamKeyStatus = 'READY' | 'NOT_INITIALIZED' | 'KEY_UNAVAILABLE'
+
+export interface DreamEnter {
+  keyStatus: DreamKeyStatus
+  /** 이번에 정리한 30일 지난 처리 이력 수 */
+  cleaned: number
+  cleanupError: string | null
+}
+
+export interface DreamSettings {
+  year: number
+  yearName: string
+  workspaceName: string
+  orgCode: string | null
+  /** YYYYMM */
+  billingMonth: string | null
+}
+
+export type DreamSeverity = 'INFO' | 'REVIEW' | 'ERROR'
+export type DreamStatus = 'OK' | 'REVIEW' | 'ERROR'
+
+/** 문제 하나. 문장은 화면이 만든다(`lib/dream`). `found` 에는 개인정보가 없다. */
+export interface DreamIssue {
+  code: string
+  severity: DreamSeverity
+  /** Excel 행 번호 */
+  row: number | null
+  /** 열 문자 A~R */
+  column: string | null
+  expected: string | null
+  found: string | null
+}
+
+export interface DreamPreviewRow {
+  sourceRow: number
+  /** A~R 18칸 — 개인참조번호(C) · 생년월일(H)은 가려져 온다 */
+  cells: string[]
+  status: DreamStatus
+  issues: DreamIssue[]
+}
+
+export interface DreamFileCheck {
+  fileName: string
+  fileSize: number
+  sha256: string
+  sheetName: string | null
+  dataRows: number
+  status: DreamStatus
+  fileIssues: DreamIssue[]
+  rowErrorCount: number
+  rowInfoCount: number
+  accountingYear: string | null
+  orgCode: string | null
+  billingMonth: string | null
+  expectedYear: number
+  expectedOrgCode: string | null
+  expectedBillingMonth: string | null
+  rows: DreamPreviewRow[]
+}
+
+export interface DreamReset {
+  result: { removedIdentities: number; removedKeys: number }
+  /** 초기화 직전 자동백업 이름 */
+  backup: string
+}

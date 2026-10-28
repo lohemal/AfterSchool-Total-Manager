@@ -84,10 +84,111 @@ pub fn check_birth(raw: &str) -> Result<String, &'static str> {
     }
     let mm: u32 = v[2..4].parse().map_err(|_| MSG)?;
     let dd: u32 = v[4..6].parse().map_err(|_| MSG)?;
-    if !(1..=12).contains(&mm) || !(1..=31).contains(&dd) {
+    // 세기를 모르므로 윤년도 모른다 — 2월은 29일까지 받는다
+    if !(1..=12).contains(&mm) || dd < 1 || dd > max_day(mm, None) {
         return Err(MSG);
     }
     Ok(v.to_string())
+}
+
+/// 그 달의 마지막 날. 해를 모르면(None) 2월은 29일.
+fn max_day(month: u32, year: Option<i32>) -> u32 {
+    match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 => match year {
+            Some(y) if !((y % 4 == 0 && y % 100 != 0) || y % 400 == 0) => 28,
+            _ => 29,
+        },
+        _ => 0,
+    }
+}
+
+/// 결제 기준월 · 수강월 `YYYYMM`. 2000~2099년, 01~12월.
+pub fn check_billing_month(raw: &str) -> Result<String, &'static str> {
+    let v = raw.trim();
+    const MSG: &str = "결제 기준월은 YYYYMM 숫자 6자리여야 합니다(예: 202609).";
+    if v.len() != 6 || !v.bytes().all(|b| b.is_ascii_digit()) {
+        return Err(MSG);
+    }
+    let yyyy: i32 = v[..4].parse().map_err(|_| MSG)?;
+    let mm: u32 = v[4..].parse().map_err(|_| MSG)?;
+    if !(2000..=2099).contains(&yyyy) || !(1..=12).contains(&mm) {
+        return Err(MSG);
+    }
+    Ok(v.to_string())
+}
+
+/// 이체예정일 `YYYYMMDD` — 실제로 있는 날짜만.
+pub fn check_transfer_date(raw: &str) -> Result<String, &'static str> {
+    let v = raw.trim();
+    const MSG: &str = "이체예정일은 YYYYMMDD 숫자 8자리 날짜여야 합니다.";
+    if v.len() != 8 || !v.bytes().all(|b| b.is_ascii_digit()) {
+        return Err(MSG);
+    }
+    let yyyy: i32 = v[..4].parse().map_err(|_| MSG)?;
+    let mm: u32 = v[4..6].parse().map_err(|_| MSG)?;
+    let dd: u32 = v[6..].parse().map_err(|_| MSG)?;
+    if !(2000..=2099).contains(&yyyy) || !(1..=12).contains(&mm) || dd < 1 || dd > max_day(mm, Some(yyyy)) {
+        return Err(MSG);
+    }
+    Ok(v.to_string())
+}
+
+/// 학년 비교용 값. 끝의 `학년` 을 **정확히 한 번만** 떼고 남은 것이 1~9 숫자여야 한다.
+/// `3학년` → 3, `3` → 3, `3학년학년` · `삼학년` · `학년` → None.
+pub fn grade_candidate(raw: &str) -> Option<i64> {
+    let v = raw.trim();
+    let core = v.strip_suffix("학년").unwrap_or(v);
+    if core.len() != 1 || !core.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    let g: i64 = core.parse().ok()?;
+    (1..=9).contains(&g).then_some(g)
+}
+
+/// 반 비교용 후보. 끝의 `반` 을 **정확히 한 번만** 뗀 값(남는 것이 있을 때만).
+///
+/// 원래 값(`가람반`)과 이 후보(`가람`)를 **둘 다** 지닌다. 학생 반 이름과 맞대어 볼 때는
+/// 둘 중 하나가 **정확히** 같은지만 본다(P3). 글자 안의 `반` 은 건드리지 않는다.
+pub fn class_candidate(raw: &str) -> Option<String> {
+    let v = raw.trim();
+    let core = v.strip_suffix('반')?;
+    (!core.is_empty()).then(|| core.to_string())
+}
+
+/// 학생 번호 — 숫자 1~3자리, 1 이상. 원래 표기(`01` 등)는 따로 지닌다.
+pub fn student_no_of(raw: &str) -> Option<i64> {
+    let v = raw.trim();
+    if v.is_empty() || v.len() > 3 || !v.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    let n: i64 = v.parse().ok()?;
+    (n >= 1).then_some(n)
+}
+
+/// 화면용 가림 — 개인참조번호는 첫 글자와 끝 세 글자만 보인다.
+pub fn mask_ref(v: &str) -> String {
+    let chars: Vec<char> = v.trim().chars().collect();
+    if chars.len() < 6 {
+        return "*".repeat(chars.len().max(1));
+    }
+    let mut s = String::new();
+    s.push(chars[0]);
+    s.push_str(&"*".repeat(chars.len() - 4));
+    s.extend(&chars[chars.len() - 3..]);
+    s
+}
+
+/// 화면용 가림 — 생년월일은 앞 두 자리(출생 연도 끝자리)만 보인다.
+pub fn mask_birth(v: &str) -> String {
+    let chars: Vec<char> = v.trim().chars().collect();
+    if chars.len() < 2 {
+        return "*".repeat(chars.len().max(1));
+    }
+    let mut s: String = chars[..2].iter().collect();
+    s.push_str(&"*".repeat(chars.len() - 2));
+    s
 }
 
 /// 강좌명코드. 영문 · 숫자만, 1~64자(예: `20260818PGM000003317`).
@@ -102,14 +203,15 @@ pub fn check_course_code(raw: &str) -> Result<String, &'static str> {
     Ok(v.to_string())
 }
 
-/// 기관코드. 숫자만, 1~20자(예: 10자리). 앞자리 0 을 지킨다.
+/// 기관코드. 영문 · 숫자만, 1~20자. 실제 결제파일은 `I100000987` 처럼 영문과 숫자가
+/// 섞여 있다. 대소문자 · 앞자리 0 을 바꾸지 않고 그대로 견준다.
 pub fn check_org_code(raw: &str) -> Result<String, &'static str> {
     let v = raw.trim();
     if v.is_empty() {
         return Err("기관코드를 입력해 주세요.");
     }
-    if v.len() > 20 || !v.bytes().all(|b| b.is_ascii_digit()) {
-        return Err("기관코드는 숫자로 된 20자 이내여야 합니다.");
+    if v.len() > 20 || !is_ascii_alnum(v) {
+        return Err("기관코드는 영문과 숫자로 된 20자 이내여야 합니다.");
     }
     Ok(v.to_string())
 }
@@ -151,7 +253,56 @@ mod tests {
         assert_eq!(check_course_code("20260818PGM000003317").unwrap(), "20260818PGM000003317");
         assert!(check_course_code("2026 PGM").is_err());
         assert_eq!(check_org_code("0024000001").unwrap(), "0024000001");
+        assert_eq!(check_org_code(" I100000987 ").unwrap(), "I100000987");
         assert!(check_org_code("24-0001").is_err());
+        assert!(check_org_code("I 100").is_err());
+    }
+
+    #[test]
+    fn 날짜와_월은_실제로_있는_것만_받는다() {
+        assert!(check_birth("170229").is_ok(), "세기를 모르니 2월 29일은 받는다");
+        for bad in ["170230", "170431", "170001", "171301", "17080"] {
+            assert!(check_birth(bad).is_err(), "{bad}");
+        }
+        assert_eq!(check_billing_month(" 202609 ").unwrap(), "202609");
+        for bad in ["202613", "202600", "20269", "2026-09", "190001"] {
+            assert!(check_billing_month(bad).is_err(), "{bad}");
+        }
+        assert!(check_transfer_date("20260923").is_ok());
+        assert!(check_transfer_date("20280229").is_ok(), "윤년");
+        for bad in ["20260229", "20260931", "2026092", "2026-09-23", "20261301"] {
+            assert!(check_transfer_date(bad).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn 학년은_끝의_학년을_한_번만_뗀다() {
+        assert_eq!(grade_candidate("3학년"), Some(3));
+        assert_eq!(grade_candidate(" 3 "), Some(3));
+        for bad in ["3학년학년", "학년", "삼학년", "10학년", "0학년", "3 학년", "학년3"] {
+            assert_eq!(grade_candidate(bad), None, "{bad}");
+        }
+    }
+
+    #[test]
+    fn 반은_끝의_반을_한_번만_떼고_안쪽_반은_둔다() {
+        assert_eq!(class_candidate("가람반").as_deref(), Some("가람"));
+        assert_eq!(class_candidate("반달반").as_deref(), Some("반달"), "앞의 반은 그대로");
+        assert_eq!(class_candidate("반달").as_deref(), None, "끝이 반이 아니면 후보 없음");
+        assert_eq!(class_candidate("반반").as_deref(), Some("반"), "한 번만 뗀다");
+        assert_eq!(class_candidate("반"), None, "남는 것이 없다");
+        assert_eq!(class_candidate("1").as_deref(), None);
+        assert_eq!(student_no_of("01"), Some(1));
+        for bad in ["0", "", "1a", "1000", "-1"] {
+            assert_eq!(student_no_of(bad), None, "{bad}");
+        }
+    }
+
+    #[test]
+    fn 화면용_가림() {
+        assert_eq!(mask_ref("I100000987"), "I******987");
+        assert_eq!(mask_ref("AB12"), "****");
+        assert_eq!(mask_birth("170806"), "17****");
     }
 
     #[test]

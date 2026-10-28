@@ -8,6 +8,10 @@
 //! 오류가 있는 줄 때문에 정상 줄까지 버리지 않는다 (§28).
 
 pub mod capacity;
+pub mod cells;
+pub mod dream_file;
+#[cfg(test)]
+pub(crate) mod dream_fixture;
 pub mod custom_fee;
 pub use custom_fee::export_custom_fee;
 pub use capacity::{export_capacity, status_text};

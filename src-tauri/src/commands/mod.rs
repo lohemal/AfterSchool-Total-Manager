@@ -3,6 +3,7 @@
 
 pub mod app;
 pub mod department;
+pub mod dream;
 pub mod eligibility;
 pub mod enrollment;
 pub mod excel;

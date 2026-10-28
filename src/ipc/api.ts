@@ -8,6 +8,11 @@ import { invoke } from '@tauri-apps/api/core'
 import type { SortSpec } from '@/lib/sortSpec'
 
 import type {
+  DreamEnter,
+  DreamFileCheck,
+  DreamKeyStatus,
+  DreamReset,
+  DreamSettings,
   RevertPreview,
   BatchResult,
   BillingBatch,
@@ -447,6 +452,17 @@ export const api = {
     }),
   excelExportIssues: (issues: RowIssue[], headers: string[]) =>
     invoke<ExportResult>('excel_export_issues', { issues, headers }),
+
+  // 방과후드림 결제관리 (P2) — 파일은 읽기만 한다
+  dreamEnter: () => invoke<DreamEnter>('dream_enter'),
+  dreamSettings: (workspaceId: number) => invoke<DreamSettings>('dream_settings', { workspaceId }),
+  dreamSetOrgCode: (code: string) => invoke<string>('dream_set_org_code', { code }),
+  dreamSetBillingMonth: (workspaceId: number, month: string) =>
+    invoke<string>('dream_set_billing_month', { workspaceId, month }),
+  dreamCheckFile: (workspaceId: number, path: string) =>
+    invoke<DreamFileCheck>('dream_check_file', { workspaceId, path }),
+  dreamKeyStatus: () => invoke<DreamKeyStatus>('dream_key_status'),
+  dreamResetIdentity: () => invoke<DreamReset>('dream_reset_identity'),
 }
 
 export type { Eligibility, Student, Department, Workspace, Year }

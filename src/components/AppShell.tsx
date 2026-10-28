@@ -45,6 +45,7 @@ const NAV: { group: string | null; items: Item[] }[] = [
       { to: '/self-pay', label: '수익자' },
       { to: '/voucher', label: '방과후 이용권' },
       { to: '/free-voucher', label: '자유수강권' },
+      { to: '/dream-payment', label: '방과후드림 결제관리' },
     ],
   },
   {

@@ -163,7 +163,7 @@ fn 열면_009_가_한_번만_적용되고_기존_자료와_정산은_그대로�
 
     let db = Db::open(&path).unwrap();
     db.read(|c| {
-        assert_eq!(migrate::current_version(c)?, 9);
+        assert_eq!(migrate::current_version(c)?, migrate::latest_version());
         assert_eq!(fingerprint(c, ws), before, "기존 표 · 자료판 · 정산 상태가 바뀌었다");
         assert_eq!(repo::settle::status(c, ws)?.state, "FRESH");
         for t in [
@@ -175,6 +175,7 @@ fn 열면_009_가_한_번만_적용되고_기존_자료와_정산은_그대로�
             "dream_job",
             "dream_job_row",
             "dream_job_event",
+            "dream_workspace_setting",
         ] {
             let n: i64 = c.query_row(&format!("SELECT COUNT(*) FROM {t}"), [], |r| r.get(0))?;
             assert_eq!(n, 0, "{t} 에 자료가 들어갔다");
@@ -196,12 +197,12 @@ fn 열면_009_가_한_번만_적용되고_기존_자료와_정산은_그대로�
         .filter(|n| n.ends_with(".db"))
         .collect();
     assert_eq!(backups.len(), 1, "{backups:?}");
-    assert!(backups[0].contains("v8"), "{backups:?}");
+    assert!(backups[0].contains("v8"), "{backups:?}"); // 008 → 최신(009 · 010)을 한 번에
 
     // 다시 열어도 다시 돌지 않는다
     let db = Db::open(&path).unwrap();
     db.read(|c| {
-        assert_eq!(migrate::current_version(c)?, 9);
+        assert_eq!(migrate::current_version(c)?, migrate::latest_version());
         assert_eq!(fingerprint(c, ws), before);
         Ok(())
     })

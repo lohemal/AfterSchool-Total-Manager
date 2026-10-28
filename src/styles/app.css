@@ -551,6 +551,10 @@
   background: #efe7fb;
   color: #5b3ea8;
 }
+.tag--bad {
+  background: var(--red-50);
+  color: var(--red-600);
+}
 .tag--warn {
   background: var(--amber-50);
   color: var(--amber-600);

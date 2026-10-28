@@ -97,6 +97,14 @@ const MIGRATIONS: &[Migration] = &[
         sql: include_str!("../../migrations/009_dream_payment.sql"),
         fk_off: false,
     },
+    // 방과후드림 작업공간별 결제 기준월 — 새 표 하나. 자료판 트리거가 없어
+    // 기준월을 바꿔도 정산이 낡음이 되지 않는다.
+    Migration {
+        version: 10,
+        name: "010_dream_workspace_setting",
+        sql: include_str!("../../migrations/010_dream_workspace_setting.sql"),
+        fk_off: false,
+    },
 ];
 
 pub fn latest_version() -> i32 {
