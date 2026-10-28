@@ -10,6 +10,7 @@
 pub mod capacity;
 pub mod cells;
 pub mod dream_file;
+pub mod dream_patch;
 #[cfg(test)]
 pub(crate) mod dream_fixture;
 pub mod custom_fee;

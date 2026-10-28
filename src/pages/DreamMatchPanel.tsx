@@ -163,7 +163,14 @@ export function DreamMatchPanel({
         onBirth={(keys) => run.mutate(() => api.dreamConfirmBirths(jobId, path, keys))}
       />
       <StudentCard students={m.students} />
-      <DreamAllocPanel workspaceId={workspaceId} path={path} session={session} onSession={setSession} onError={failed} />
+      <DreamAllocPanel
+        workspaceId={workspaceId}
+        path={path}
+        billingMonth={check.billingMonth}
+        session={session}
+        onSession={setSession}
+        onError={failed}
+      />
     </>
   )
 }

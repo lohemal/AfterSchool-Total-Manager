@@ -2480,5 +2480,320 @@ mod p3 {
                 assert!(!events.contains(x), "기록에 {x}");
             }
         }
+
+        // ─────────────────────────────────────────────── P5 — 결과 Excel
+
+        mod p5 {
+            use super::*;
+            use crate::excel::dream_file;
+            use crate::excel::dream_patch;
+            use crate::repo::dream::export;
+            use crate::domain::dream_alloc::Totals;
+
+            const DATE: &str = "20261030";
+
+            /// 시험마다 따로 쓰는 빈 폴더(끝나면 지운다)
+            struct Dir(std::path::PathBuf);
+            impl Dir {
+                fn new() -> Self {
+                    let p = std::env::temp_dir().join(format!("dream-p5-{}", uuid::Uuid::new_v4().simple()));
+                    std::fs::create_dir_all(&p).unwrap();
+                    Dir(p)
+                }
+                fn path(&self, name: &str) -> std::path::PathBuf {
+                    self.0.join(name)
+                }
+                fn files(&self) -> Vec<String> {
+                    let mut v: Vec<String> = std::fs::read_dir(&self.0)
+                        .unwrap()
+                        .map(|e| e.unwrap().file_name().to_string_lossy().to_string())
+                        .collect();
+                    v.sort();
+                    v
+                }
+            }
+            impl Drop for Dir {
+                fn drop(&mut self) {
+                    let _ = std::fs::remove_dir_all(&self.0);
+                }
+            }
+
+            /// 원본을 디스크에 두고, P3 확정 · P4 배분까지 마친 작업
+            fn ready(f: &F, rows: Vec<Vec<V>>, dir: &Dir) -> (i64, Vec<u8>, std::path::PathBuf) {
+                let bytes = xlsx(rows);
+                let src = dir.path("결제원본.xlsx");
+                std::fs::write(&src, &bytes).unwrap();
+                let s = confirmed(f, &bytes);
+                assert!(s.matching.p4_ready, "{:?}", s.matching.file_reasons);
+                assert_eq!(allocate(f, s.job_id, &bytes).status, "DONE");
+                (s.job_id, bytes, src)
+            }
+
+            fn export_to(f: &F, job: i64, bytes: &[u8], src: &std::path::Path, out: &std::path::Path, date: &str) -> crate::error::AppResult<export::Written> {
+                let ep = f.db.read(|c| export::prepare(c, job, bytes, date))?;
+                let w = export::write_result(src, out, bytes, &ep, dream_patch::patch)?;
+                f.db.write(|c| export::record(c, job, &w, &ep))?;
+                Ok(w)
+            }
+
+            fn exported(f: &F, job: i64) -> Vec<String> {
+                f.db.read(|c| {
+                    let v: Vec<String> = c
+                        .prepare("SELECT detail FROM dream_job_event WHERE job_id = ?1 AND kind = 'RESULT_EXPORTED' ORDER BY id")?
+                        .query_map([job], |r| r.get(0))?
+                        .collect::<rusqlite::Result<_>>()?;
+                    Ok(v)
+                })
+                .unwrap()
+            }
+
+            #[test]
+            fn 검증된_배분을_행_그대로_옮기고_원본과_정산은_그대로다() {
+                let f = F::mixed();
+                setup(&f);
+                let dir = Dir::new();
+                let (job, bytes, src) = ready(&f, full_rows(), &dir);
+                let before = f.db.read(|c| Ok(fingerprint(c, f.ws))).unwrap();
+                let dv = versions(&f);
+                let src_sha = crypto::sha256_hex(&std::fs::read(&src).unwrap());
+                let out = dir.path("방과후드림_결제결과_202610_20261030.xlsx");
+                let w = export_to(&f, job, &bytes, &src, &out, DATE).unwrap();
+
+                // 결과 = 저장된 after 그대로, R = 고른 날짜, 0원 줄 포함
+                let stored = f.db.read(|c| job::stored_after(c, job)).unwrap();
+                let res = dream_file::parse("결과.xlsx", &std::fs::read(&out).unwrap());
+                assert!(res.file_issues.is_empty());
+                assert_eq!(res.rows.len(), 24);
+                for r in &res.rows {
+                    let (_, a) = stored.iter().find(|(x, _)| *x == r.source_row).unwrap();
+                    let (o, p, q) = a.unwrap();
+                    assert_eq!((r.personal_before, r.voucher_before, r.free_voucher_before), (Some(o), Some(p), Some(q)));
+                    assert_eq!(r.transfer_date.as_deref(), Some(DATE));
+                }
+                assert!(res.rows.iter().any(|r| r.amount_n == Some(0) && r.transfer_date.as_deref() == Some(DATE)));
+                // 파일 전체 = 정산 전체
+                let a = verify(&f, job, &bytes);
+                let sum = res.rows.iter().fold(Totals::default(), |mut t, r| {
+                    t.add(r.amount_n.unwrap(), r.personal_before.unwrap(), r.voucher_before.unwrap(), r.free_voucher_before.unwrap());
+                    t
+                });
+                assert_eq!(sum, a.settlement);
+                assert_eq!(w.verify.a_to_n_changed, 0);
+                assert_eq!(w.verify.non_target_same, w.verify.entries - 1);
+                // 원본 파일 · 업무 자료 · 자료판 · 정산은 그대로
+                assert_eq!(crypto::sha256_hex(&std::fs::read(&src).unwrap()), src_sha);
+                assert_eq!(f.db.read(|c| Ok(fingerprint(c, f.ws))).unwrap(), before);
+                assert_eq!(versions(&f), dv);
+                assert_eq!(f.state(), "FRESH");
+                // 기록: 날짜 · SHA · 파일 이름만(경로 · 개인정보 없음), P4 결과는 그대로 유효
+                let ev = exported(&f, job);
+                assert_eq!(ev.len(), 1);
+                assert!(ev[0].starts_with(&format!("date={DATE} sha={}", w.sha256)), "{}", ev[0]);
+                assert!(ev[0].ends_with("file=방과후드림_결제결과_202610_20261030.xlsx"));
+                assert!(!ev[0].contains(&dir.0.to_string_lossy().to_string()));
+                for x in ["2024000001", "170101", "가온"] {
+                    assert!(!ev[0].contains(x));
+                }
+                assert_eq!(verify(&f, job, &bytes).status, "DONE");
+                assert_eq!(after_rows(&f, job), 24);
+                // 임시 파일이 남지 않는다
+                assert_eq!(dir.files(), ["결제원본.xlsx", "방과후드림_결제결과_202610_20261030.xlsx"]);
+            }
+
+            #[test]
+            fn 이체예정일이_없거나_실제_날짜가_아니면_만들지_않는다() {
+                let f = F::mixed();
+                setup(&f);
+                let dir = Dir::new();
+                let (job, bytes, src) = ready(&f, full_rows(), &dir);
+                for d in ["", "2026-10-30", "20261332", "20260230", "2026103"] {
+                    let e = export_to(&f, job, &bytes, &src, &dir.path("결과.xlsx"), d).unwrap_err();
+                    assert_eq!(e.code, "INVALID_TRANSFER_DATE", "{d}");
+                }
+                assert!(!dir.path("결과.xlsx").exists());
+                assert!(exported(&f, job).is_empty());
+            }
+
+            #[test]
+            fn 우선순위가_바뀌어_재계산이_필요하면_만들지_않는다() {
+                let f = F::mixed();
+                setup(&f);
+                let dir = Dir::new();
+                let (job, bytes, src) = ready(&f, full_rows(), &dir);
+                let art = f.dp["미술"];
+                f.db.write(|c| allocation::save_item_priority(c, art, &[수용비.into(), 강사료.into()])).unwrap();
+                let e = export_to(&f, job, &bytes, &src, &dir.path("결과.xlsx"), DATE).unwrap_err();
+                assert_eq!(e.code, "ALLOCATION_STALE");
+                assert!(!dir.path("결과.xlsx").exists());
+                // 다시 계산하면 만들 수 있다
+                assert_eq!(allocate(&f, job, &bytes).status, "DONE");
+                assert!(export_to(&f, job, &bytes, &src, &dir.path("결과.xlsx"), DATE).is_ok());
+            }
+
+            #[test]
+            fn 정산이_바뀌거나_낡으면_만들지_않는다() {
+                let mut f = F::mixed();
+                setup(&f);
+                let dir = Dir::new();
+                let (job, bytes, src) = ready(&f, full_rows(), &dir);
+                f.dept("바둑", "바둑", "A", vec![fee(강사료, 1)]); // 자료가 바뀌어 STALE_DATA
+                assert_ne!(f.state(), "FRESH");
+                let e = export_to(&f, job, &bytes, &src, &dir.path("결과.xlsx"), DATE).unwrap_err();
+                assert_eq!(e.code, "SETTLEMENT_NOT_FRESH");
+                f.generate(); // 다시 정산 — 정산 id 가 바뀐다
+                let e = export_to(&f, job, &bytes, &src, &dir.path("결과.xlsx"), DATE).unwrap_err();
+                assert_eq!(e.code, "SETTLEMENT_CHANGED");
+                assert!(!dir.path("결과.xlsx").exists());
+                assert!(exported(&f, job).is_empty());
+            }
+
+            #[test]
+            fn 원본_파일이_바뀌면_만들지_않는다() {
+                let f = F::mixed();
+                setup(&f);
+                let dir = Dir::new();
+                let (job, bytes, src) = ready(&f, full_rows(), &dir);
+                let other = xlsx(four("A", "로봇"));
+                assert_eq!(f.db.read(|c| export::prepare(c, job, &other, DATE)).unwrap_err().code, "FILE_CHANGED");
+                // 준비 뒤에 디스크의 원본이 바뀌어도 쓰지 않는다
+                let ep = f.db.read(|c| export::prepare(c, job, &bytes, DATE)).unwrap();
+                std::fs::write(&src, &other).unwrap();
+                let e = export::write_result(&src, &dir.path("결과.xlsx"), &bytes, &ep, dream_patch::patch).unwrap_err();
+                assert_eq!(e.code, "FILE_CHANGED");
+                assert!(!dir.path("결과.xlsx").exists());
+                assert_eq!(dir.files(), ["결제원본.xlsx"], "임시 파일이 남지 않는다");
+            }
+
+            #[test]
+            fn 원본_자리에는_어떤_꼴로도_저장하지_않는다() {
+                let f = F::mixed();
+                setup(&f);
+                let dir = Dir::new();
+                let (job, bytes, src) = ready(&f, full_rows(), &dir);
+                let sha = crypto::sha256_hex(&std::fs::read(&src).unwrap());
+                let sneaky = [
+                    src.clone(),
+                    dir.path("결제원본.XLSX"),
+                    dir.0.join(".").join("결제원본.xlsx"),
+                    dir.0.join("..").join(dir.0.file_name().unwrap()).join("결제원본.xlsx"),
+                ];
+                for p in sneaky {
+                    let e = export_to(&f, job, &bytes, &src, &p, DATE).unwrap_err();
+                    assert_eq!(e.code, "SAME_AS_SOURCE", "{}", p.display());
+                }
+                assert_eq!(crypto::sha256_hex(&std::fs::read(&src).unwrap()), sha);
+                assert!(exported(&f, job).is_empty());
+                // .xlsx 가 아니거나 폴더면 거절
+                assert!(export_to(&f, job, &bytes, &src, &dir.path("결과.csv"), DATE).is_err());
+                assert!(export_to(&f, job, &bytes, &src, &dir.0, DATE).is_err());
+            }
+
+            #[test]
+            fn 저장할_수_없는_자리면_실패하고_아무것도_남기지_않는다() {
+                let f = F::mixed();
+                setup(&f);
+                let dir = Dir::new();
+                let (job, bytes, src) = ready(&f, full_rows(), &dir);
+                let e = export_to(&f, job, &bytes, &src, &dir.path("없는폴더").join("결과.xlsx"), DATE).unwrap_err();
+                assert_eq!(e.code, "INVALID");
+                // 결과 자리가 다른 프로그램에서 쓰는 중(여기서는 폴더라 옮길 수 없음)
+                std::fs::create_dir(dir.path("잠김.xlsx")).unwrap();
+                assert!(export_to(&f, job, &bytes, &src, &dir.path("잠김.xlsx"), DATE).is_err());
+                assert_eq!(dir.files(), ["결제원본.xlsx", "잠김.xlsx"], "임시 파일 없음");
+                assert!(exported(&f, job).is_empty());
+            }
+
+            #[test]
+            fn 재검증에_걸리는_결과는_저장하지_않는다() {
+                let f = F::mixed();
+                setup(&f);
+                let dir = Dir::new();
+                let (job, bytes, src) = ready(&f, full_rows(), &dir);
+                let ep = f.db.read(|c| export::prepare(c, job, &bytes, DATE)).unwrap();
+                // 잘못 만드는 writer — O 하나를 1원 틀리게 적는다
+                let bad = |s: &[u8], p: &dream_patch::PatchPlan, r: &[u32]| {
+                    let mut wrong = p.clone();
+                    let i = wrong.rows.iter().position(|x| x.o > 0).unwrap();
+                    wrong.rows[i].o -= 1;
+                    wrong.rows[i].amount_n -= 1;
+                    dream_patch::patch(s, &wrong, r)
+                };
+                let e = export::write_result(&src, &dir.path("결과.xlsx"), &bytes, &ep, bad).unwrap_err();
+                assert!(e.code.starts_with("PATCH_") || e.code.starts_with("VERIFY_"), "{}", e.code);
+                // 원본을 그대로 돌려주는 writer(아무것도 안 고침)
+                let lazy = |s: &[u8], _: &dream_patch::PatchPlan, _: &[u32]| Ok((s.to_vec(), dream_patch::PatchReport::default()));
+                let e = export::write_result(&src, &dir.path("결과.xlsx"), &bytes, &ep, lazy).unwrap_err();
+                assert!(e.code.starts_with("VERIFY_"), "{}", e.code);
+                assert!(!dir.path("결과.xlsx").exists());
+                assert_eq!(dir.files(), ["결제원본.xlsx"]);
+                assert!(exported(&f, job).is_empty());
+            }
+
+            #[test]
+            fn 같은_결과로_다시_만들고_날짜를_바꿔도_opq_는_같다() {
+                let f = F::mixed();
+                setup(&f);
+                let dir = Dir::new();
+                let (job, bytes, src) = ready(&f, full_rows(), &dir);
+                let a = dir.path("결과1.xlsx");
+                let b = dir.path("결과2.xlsx");
+                export_to(&f, job, &bytes, &src, &a, DATE).unwrap();
+                export_to(&f, job, &bytes, &src, &b, "20261105").unwrap();
+                let ra = dream_file::parse("a.xlsx", &std::fs::read(&a).unwrap());
+                let rb = dream_file::parse("b.xlsx", &std::fs::read(&b).unwrap());
+                for (x, y) in ra.rows.iter().zip(&rb.rows) {
+                    assert_eq!((x.personal_before, x.voucher_before, x.free_voucher_before), (y.personal_before, y.voucher_before, y.free_voucher_before));
+                    assert_eq!((x.transfer_date.as_deref(), y.transfer_date.as_deref()), (Some(DATE), Some("20261105")));
+                }
+                let ev = exported(&f, job);
+                assert_eq!(ev.len(), 2);
+                assert!(ev[0].starts_with("date=20261030") && ev[1].starts_with("date=20261105"));
+                // 이체예정일을 바꿔도 배분 결과는 유효하다
+                assert_eq!(verify(&f, job, &bytes).status, "DONE");
+                // 이미 있는 결과 파일 — 저장 창에서 덮어쓰기를 고른 경우
+                export_to(&f, job, &bytes, &src, &a, "20261106").unwrap();
+                let ra2 = dream_file::parse("a.xlsx", &std::fs::read(&a).unwrap());
+                assert!(ra2.rows.iter().all(|r| r.transfer_date.as_deref() == Some("20261106")));
+                assert_eq!(dir.files(), ["결과1.xlsx", "결과2.xlsx", "결제원본.xlsx"]);
+            }
+
+            #[test]
+            fn 취소_학생이_있어도_정산_전체를_담은_파일만_만든다() {
+                let f = cancelled();
+                let dir = Dir::new();
+                let mut rows = four("A", "로봇");
+                rows.extend(b_rows());
+                let (job, bytes, src) = ready(&f, rows, &dir);
+                let w = export_to(&f, job, &bytes, &src, &dir.path("결과.xlsx"), DATE).unwrap();
+                let res = dream_file::parse("결과.xlsx", &std::fs::read(dir.path("결과.xlsx")).unwrap());
+                let n: i64 = res.rows.iter().map(|r| r.amount_n.unwrap()).sum();
+                assert_eq!(n, 56_500, "취소했지만 금액이 남은 B 포함");
+                assert_eq!(w.verify.data_rows, 8);
+                // A 만 든 파일은 P4 부터 막혀 결과도 만들 수 없다
+                let only_a = xlsx(four("A", "로봇"));
+                let s = confirmed(&f, &only_a);
+                assert!(!s.matching.p4_ready);
+                let e = f.db.read(|c| export::prepare(c, s.job_id, &only_a, DATE)).unwrap_err();
+                assert_eq!(e.code, "ALLOCATION_STALE");
+            }
+
+            #[test]
+            fn 결과_파일을_다시_넣어도_같은_배분이_나온다() {
+                let f = F::mixed();
+                setup(&f);
+                let dir = Dir::new();
+                let (job, bytes, src) = ready(&f, full_rows(), &dir);
+                let out = dir.path("결과.xlsx");
+                export_to(&f, job, &bytes, &src, &out, DATE).unwrap();
+                let again = std::fs::read(&out).unwrap();
+                let s = confirmed(&f, &again);
+                assert!(s.matching.p4_ready, "{:?}", s.matching.file_reasons);
+                let a2 = allocate(&f, s.job_id, &again);
+                assert_eq!(a2.status, "DONE");
+                let first = f.db.read(|c| job::stored_after(c, job)).unwrap();
+                let second = f.db.read(|c| job::stored_after(c, s.job_id)).unwrap();
+                assert_eq!(first, second);
+            }
+        }
     }
 }

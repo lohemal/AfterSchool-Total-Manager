@@ -1,6 +1,6 @@
-//! 방과후드림 결제관리 명령 (P2 파일 읽기 · 검증 · 미리보기, P3 매칭, P4 우선순위 · 배분).
+//! 방과후드림 결제관리 명령 (P2 파일 읽기 · 검증 · 미리보기, P3 매칭, P4 우선순위 · 배분, P5 결과 Excel).
 //!
-//! 결제파일은 **읽기만** 한다(P4 까지 원본 · 결과 Excel 을 쓰지 않는다). DB 에 쓰는 것은
+//! 원본 결제파일은 **읽기만** 한다(P5 결과 파일은 사람이 고른 다른 자리에 새로 만든다). DB 에 쓰는 것은
 //! 기관코드 · 결제 기준월 · (화면 진입 때) 30일 지난 처리 이력 정리 · (사람이 고를 때)
 //! 개인정보 초기화 · 개인참조번호 · 강좌 연결 · 방과후드림 우선순위 · 처리 이력(배분 결과
 //! 포함)뿐이다. 모두 `dream_*` 표라 정산 자료판과 무관하다.
@@ -275,4 +275,63 @@ pub fn dream_allocate(db: State<'_, Db>, job_id: i64, path: String) -> AppResult
 pub fn dream_allocation(db: State<'_, Db>, job_id: i64, path: String) -> AppResult<Allocation> {
     let (_, bytes) = read_source(&path)?;
     db.read(|c| allocation::verify(c, job_id, &bytes))
+}
+
+// ─────────────────────────────────────────────── P5 — 결과 Excel
+
+use crate::domain::dream_alloc::Totals;
+use crate::repo::dream::export::{self, Written};
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DreamExport {
+    pub written: Written,
+    pub rows: usize,
+    pub students: usize,
+    pub totals: Totals,
+    pub transfer_date: String,
+    /// 처리 이력에 남겼는가. 파일은 만들어졌는데 기록만 실패하면 false — 숨기지 않고 알린다
+    pub history_saved: bool,
+    pub history_error: Option<String>,
+}
+
+/// [결과 Excel 생성] — 배분 결과를 다시 확인한 뒤 원본 XLSX 의 O · P · Q · R 만 바꾼 결과 파일을
+/// `out_path` 에 만든다. 원본 파일은 읽기만 한다. 저장 창에서 사람이 고른 자리여야 한다.
+#[tauri::command]
+pub fn dream_export(
+    db: State<'_, Db>,
+    job_id: i64,
+    path: String,
+    out_path: String,
+    transfer_date: String,
+) -> AppResult<DreamExport> {
+    let (_, bytes) = read_source(&path)?;
+    let ep = db.read(|c| export::prepare(c, job_id, &bytes, &transfer_date))?;
+    let written = export::write_result(
+        Path::new(&path),
+        Path::new(&out_path),
+        &bytes,
+        &ep,
+        crate::excel::dream_patch::patch,
+    )?;
+    let (history_saved, history_error) = match db.write(|c| export::record(c, job_id, &written, &ep)) {
+        Ok(()) => (true, None),
+        Err(e) => {
+            log::warn!("방과후드림 결과 파일 기록 실패: {}", e.code);
+            (false, Some("결과 파일은 생성되었지만 처리 이력을 저장하지 못했습니다.".to_string()))
+        }
+    };
+    // 저장 창의 처음 자리 — 다른 업무파일 저장과 같은 설정(폴더만)
+    if let Some(parent) = Path::new(&out_path).parent().and_then(|p| p.to_str()) {
+        let _ = db.write(|c| repo::setting::set(c, crate::commands::excel::LAST_SAVE_DIR, parent));
+    }
+    Ok(DreamExport {
+        rows: ep.plan.rows.len(),
+        students: ep.students,
+        totals: ep.totals,
+        transfer_date: ep.plan.transfer_date.clone(),
+        written,
+        history_saved,
+        history_error,
+    })
 }

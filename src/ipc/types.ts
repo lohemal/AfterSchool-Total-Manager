@@ -1303,3 +1303,30 @@ export interface DreamAllocation {
   priorityDigest: string
   fingerprint: string | null
 }
+
+// ─────────────────────────────────────────────── 방과후드림 P5 — 결과 Excel
+
+export interface DreamExport {
+  written: {
+    /** 저장한 파일 이름(경로 없음) */
+    fileName: string
+    /** [폴더 열기] 용 */
+    path: string
+    sha256: string
+    patch: { sheetPart: string; entries: number; dataRows: number; changedCells: number; insertedCells: number }
+    verify: {
+      entries: number
+      nonTargetSame: number
+      dataRows: number
+      sheetRows: number
+      targetCellsChanged: number
+      aToNChanged: number
+    }
+  }
+  rows: number
+  students: number
+  totals: DreamTotals
+  transferDate: string
+  historySaved: boolean
+  historyError: string | null
+}

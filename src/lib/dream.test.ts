@@ -13,6 +13,7 @@ import {
   move,
   prioritySourceLabel,
   reasonText,
+  resultFileName,
   statusLabel,
   transferDateCode,
 } from './dream'
@@ -89,6 +90,11 @@ describe('방과후드림 배분 (P4)', () => {
     expect(transferDateCode('2026-13-01')).toBeNull()
     expect(transferDateCode('')).toBeNull()
     expect(transferDateCode('20261028')).toBeNull()
+  })
+
+  it('결과 파일 이름에는 기준월 · 이체예정일만', () => {
+    expect(resultFileName('202610', '20261030')).toBe('방과후드림_결제결과_202610_20261030.xlsx')
+    expect(resultFileName(null, '20261030')).toBe('방과후드림_결제결과_20261030.xlsx')
   })
 
   it('차례는 한 칸씩 옮기고 끝에서는 그대로', () => {

@@ -19,10 +19,12 @@
 //! | `matching` | 학생 · 강좌 · 항목 · 금액 정확 매칭, 학생 단위 판정 (P3) |
 //! | `session` | 매칭 · 검증 작업 시작 · 다시 검증 · 확인 (P3) |
 //! | `allocation` | 방과후드림 우선순위 화면 · 지원금 재배분 · 검산 · 결과 무효화 (P4) |
+//! | `export` | 검증된 배분 결과를 원본 XLSX 에 옮긴 결과 파일 · 성공 기록 (P5) |
 
 pub mod allocation;
 pub mod amount;
 pub mod course;
+pub mod export;
 pub mod file_check;
 pub mod identity;
 pub mod job;

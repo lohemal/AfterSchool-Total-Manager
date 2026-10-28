@@ -8,29 +8,41 @@
  * [배분 계산]을 누를 때마다 서버가 파일 지문 · 정산 · 매칭 전체를 다시 확인한다. 우선순위를
  * 바꾸거나 매칭 쪽에서 무엇이든 다시 하면 이전 결과는 버린다(다시 계산해야 한다).
  *
- * 결과 Excel 은 아직 만들지 않는다(P5). 이체예정일은 이 화면에서만 들고 있다가 P5 에 넘긴다.
+ * [결과 Excel 생성](P5)은 저장 자리를 먼저 묻고, 서버가 배분 결과를 처음부터 다시 확인한 뒤에만
+ * 원본의 O · P · Q · R 만 바꾼 새 파일을 그 자리에 만든다. 원본 파일은 건드리지 않는다.
+ * 이체예정일은 이 화면에서만 들고 있다가 그때 넘긴다(배분 결과를 낡게 만들지 않는다).
  */
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { save } from '@tauri-apps/plugin-dialog'
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 
 import { useToast } from '@/components/Toast'
 import { Button, Card, Input, Notice, Select } from '@/components/ui'
 import { api, errorMessage } from '@/ipc/api'
-import type { DreamAllocation, DreamAllocStudent, DreamPriorityView, DreamSession, DreamTotals } from '@/ipc/types'
-import { allocIssueText, move, prioritySourceLabel, transferDateCode } from '@/lib/dream'
+import type {
+  DreamAllocation,
+  DreamAllocStudent,
+  DreamExport,
+  DreamPriorityView,
+  DreamSession,
+  DreamTotals,
+} from '@/ipc/types'
+import { allocIssueText, move, prioritySourceLabel, resultFileName, transferDateCode } from '@/lib/dream'
 
 const won = (n: number) => n.toLocaleString('ko-KR')
 
 export function DreamAllocPanel({
   workspaceId,
   path,
+  billingMonth,
   session,
   onSession,
   onError,
 }: {
   workspaceId: number
   path: string
+  billingMonth: string | null
   session: DreamSession
   /** 배분 계산이 다시 돌린 매칭 결과로 위 화면을 바꿔 그린다 */
   onSession: (s: DreamSession) => void
@@ -62,6 +74,35 @@ export function DreamAllocPanel({
       }
     },
     onError,
+  })
+
+  const [made, setMade] = useState<DreamExport | null>(null)
+  const toast = useToast()
+  const exportFile = useMutation({
+    mutationFn: async (transferDate: string) => {
+      const dir = await api.exportLastDir()
+      const name = resultFileName(billingMonth, transferDate)
+      const target = await save({
+        defaultPath: dir ? `${dir}\\${name}` : name,
+        filters: [{ name: 'Excel 파일', extensions: ['xlsx'] }],
+      })
+      if (!target) return null // 그만두었다 — 오류가 아니다
+      return api.dreamExport(session.jobId, path, target, transferDate)
+    },
+    onSuccess: (r) => {
+      if (!r) return
+      setMade(r)
+      if (r.historySaved) toast.ok(`결과 파일을 저장했습니다.\n${r.written.fileName}`)
+      else toast.bad(r.historyError ?? '결과 파일은 생성되었지만 처리 이력을 저장하지 못했습니다.')
+    },
+    onError: (e) => {
+      const c = (e as { code?: string }).code ?? ''
+      if (c === 'ALLOCATION_STALE' || c === 'EXPORT_INCONSISTENT') {
+        setResult(null)
+        setStaleWhy('배분 결과가 현재 자료와 일치하지 않습니다. 다시 검증 · 계산한 뒤 결과 파일을 만들어 주세요.')
+      }
+      onError(e)
+    },
   })
 
   const ready = session.matching.p4Ready
@@ -136,17 +177,79 @@ export function DreamAllocPanel({
           )}
         </div>
         <div className="hint" style={{ marginTop: 8 }}>
-          결과 파일 만들기(다음 단계):{' '}
-          {result?.status === 'DONE' && code ? (
-            <span className="tag tag--free">준비됨</span>
-          ) : (
-            <span className="tag tag--bad">
-              {result?.status === 'DONE' ? '이체예정일 필요' : '배분 검증 완료 필요'}
-            </span>
-          )}
+          선택한 이체예정일은 모든 결제행에 동일하게 적용되며, 원본 파일에 기존 이체예정일이 있으면 선택한 날짜로
+          변경됩니다.
         </div>
       </Card>
+
+      <Card
+        title="결과 Excel"
+        actions={
+          <Button
+            variant="primary"
+            small
+            disabled={result?.status !== 'DONE' || !code || exportFile.isPending}
+            onClick={() => code && exportFile.mutate(code)}
+          >
+            {exportFile.isPending ? '만드는 중…' : '결과 Excel 생성'}
+          </Button>
+        }
+      >
+        {result?.status !== 'DONE' ? (
+          <span className="tag tag--bad">배분 검증 완료 필요</span>
+        ) : !code ? (
+          <span className="tag tag--bad">이체예정일 필요</span>
+        ) : (
+          <div className="hint">
+            저장할 자리를 고르면, 배분 결과를 처음부터 다시 확인한 뒤 원본 결제파일을 그대로 복사하여 개인부담금(O) ·
+            이용권(P) · 자유수강권(Q) · 이체예정일(R)만 바꾼 새 파일을 만듭니다. 원본 파일은 바뀌지 않으며, 원본과 같은
+            자리에는 저장하지 않습니다. 만든 파일을 다시 읽어 확인한 뒤에만 저장합니다.
+          </div>
+        )}
+        {made && <ExportDone r={made} />}
+      </Card>
     </>
+  )
+}
+
+function ExportDone({ r }: { r: DreamExport }) {
+  const t = r.totals
+  return (
+    <div style={{ marginTop: 10 }}>
+      <Notice
+        tone={r.historySaved ? 'info' : 'warn'}
+        actions={
+          <Button small onClick={() => void api.revealFile(r.written.path)}>
+            폴더 열기
+          </Button>
+        }
+      >
+        <b>{r.written.fileName}</b> 저장 완료 — 결제행 {won(r.rows)}줄 · 학생 {won(r.students)}명 · 이체예정일{' '}
+        {r.transferDate}
+        {!r.historySaved && <div>{r.historyError}</div>}
+      </Notice>
+      <table className="table" style={{ maxWidth: 560 }}>
+        <tbody>
+          <tr>
+            <td className="left">정산금액</td>
+            <td className="num">{won(t.n)}</td>
+            <td className="left">개인부담금</td>
+            <td className="num">{won(t.o)}</td>
+          </tr>
+          <tr>
+            <td className="left">이용권</td>
+            <td className="num">{won(t.p)}</td>
+            <td className="left">자유수강권</td>
+            <td className="num">{won(t.q)}</td>
+          </tr>
+        </tbody>
+      </table>
+      <div className="hint" style={{ marginTop: 6 }}>
+        다시 확인: 바뀐 칸 {won(r.written.verify.targetCellsChanged)}개(O~R만) · A~N 변경 {r.written.verify.aToNChanged}건 ·
+        행 {won(r.written.verify.sheetRows)}개 그대로 · 시트 밖 항목 {r.written.verify.nonTargetSame}/
+        {r.written.verify.entries - 1}개 원본과 같음
+      </div>
+    </div>
   )
 }
 

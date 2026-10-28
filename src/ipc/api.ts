@@ -15,6 +15,7 @@ import type {
   DreamSettings,
   DreamSession,
   DreamAllocation,
+  DreamExport,
   DreamPriorityView,
   RevertPreview,
   BatchResult,
@@ -485,6 +486,8 @@ export const api = {
     invoke<DreamPriorityView>('dream_save_item_priority', { workspaceId, departmentId, order }),
   dreamAllocate: (jobId: number, path: string) => invoke<DreamAllocation>('dream_allocate', { jobId, path }),
   dreamAllocation: (jobId: number, path: string) => invoke<DreamAllocation>('dream_allocation', { jobId, path }),
+  dreamExport: (jobId: number, path: string, outPath: string, transferDate: string) =>
+    invoke<DreamExport>('dream_export', { jobId, path, outPath, transferDate }),
 }
 
 export type { Eligibility, Student, Department, Workspace, Year }

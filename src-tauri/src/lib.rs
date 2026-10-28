@@ -182,6 +182,7 @@ pub fn run() {
             commands::dream::dream_save_item_priority,
             commands::dream::dream_allocate,
             commands::dream::dream_allocation,
+            commands::dream::dream_export,
             commands::excel::excel_template,
             commands::excel::excel_preview,
             commands::excel::excel_commit,

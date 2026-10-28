@@ -218,6 +218,14 @@ export function move<T>(list: T[], index: number, by: -1 | 1): T[] {
   return out
 }
 
+/**
+ * 결과 파일 기본 이름 — 결제 기준월 · 이체예정일만(학생 정보 없음).
+ * 예: `방과후드림_결제결과_202610_20261030.xlsx`
+ */
+export function resultFileName(billingMonth: string | null, transferDate: string): string {
+  return ['방과후드림_결제결과', billingMonth, transferDate].filter(Boolean).join('_') + '.xlsx'
+}
+
 /** 날짜 선택기 값(`YYYY-MM-DD`) → 결과 파일 R열 값(`YYYYMMDD`). 실제 날짜가 아니면 null. */
 export function transferDateCode(v: string): string | null {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(v)
