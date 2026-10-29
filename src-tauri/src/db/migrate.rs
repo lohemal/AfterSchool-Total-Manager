@@ -105,7 +105,7 @@ const MIGRATIONS: &[Migration] = &[
         sql: include_str!("../../migrations/010_dream_workspace_setting.sql"),
         fk_off: false,
     },
-    // 방과후드림 적용 학년(작업공간별) · 공통 항목 차례 — 새 표 둘. 009 의 부서별 항목
+    // 방과후드림 적용 학년 · 공통 항목 차례(둘 다 작업공간별) — 새 표 둘. 009 의 부서별 항목
     // 차례 표는 그대로 둔다(제안용으로만 읽는다). 자료판 트리거와 무관하다.
     Migration {
         version: 11,

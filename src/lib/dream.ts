@@ -207,7 +207,7 @@ const ALLOC: Record<string, (i: DreamAllocIssue) => string> = {
   ALLOC_PERSONAL_SUM_MISMATCH: () => '개인부담 합계가 정산 개인부담과 다릅니다.',
   ALLOC_FILE_SUM_MISMATCH: (i) => `파일 전체 배분 합계가 정산 전체와 다릅니다(${i.detail ?? ''}).`,
   ITEM_ORDER_NOT_CONFIRMED: () =>
-    '예전 버전에서 부서마다 다르게 저장한 항목 차례가 있습니다. 모든 부서에 쓸 항목 차례를 확인하고 [항목 차례 저장]을 눌러 주세요.',
+    '예전 버전에서 부서마다 다르게 저장한 항목 차례가 있습니다. 이 작업공간의 모든 부서에 쓸 항목 차례를 확인하고 [항목 차례 저장]을 눌러 주세요.',
 }
 
 export function allocIssueText(i: DreamAllocIssue): string {

@@ -63,7 +63,7 @@ pub struct PriorityView {
     pub dept_source: &'static str,
     /// 배분할 차례대로
     pub departments: Vec<PriorityDept>,
-    /// 공통 항목 차례 — 모든 부서에 같다(P6)
+    /// 공통 항목 차례 — 이 작업공간의 모든 부서에 같다(P6)
     pub items: Vec<PriorityItem>,
     /// `DREAM` | `LEGACY`(v0.1.11 부서별 차례가 모두 같았음) | `CONFLICT`(부서마다 달랐음 —
     /// 저장해야 배분) | `SETTLEMENT` | `DEFAULT`
@@ -160,14 +160,18 @@ pub fn save_dept_priority(conn: &Connection, workspace_id: i64, order: &[i64]) -
     invalidate_if_changed(conn, workspace_id, &before)
 }
 
-/// 공통 항목 차례 저장 — 모든 부서 · 모든 작업공간에 같다. 저장된 차례가 실제로 바뀌었으면
-/// 모든 작업공간에서 끝나지 않은 작업의 배분 결과를 비운다(돌려주는 값은 비운 작업 수).
-/// 기존 정산 항목 순위 · v0.1.11 부서별 차례 표는 건드리지 않는다.
-pub fn save_common_item_order(conn: &Connection, order: &[String]) -> AppResult<usize> {
-    if !priority::save_common_item_order(conn, order)? {
+/// 이 작업공간의 공통 항목 차례 저장 — 그 작업공간의 모든 부서에 같다. 저장된 차례가 실제로
+/// 바뀌었으면 **이 작업공간의** 끝나지 않은 작업의 배분 결과만 비운다(다른 작업공간은 그대로).
+/// 돌려주는 값은 비운 작업 수. 기존 정산 항목 순위 · v0.1.11 부서별 차례 표는 건드리지 않는다.
+pub fn save_common_item_order(conn: &Connection, workspace_id: i64, order: &[String]) -> AppResult<usize> {
+    // 쓰던 차례(기본값 포함)와 같은 차례를 처음 저장하는 것은 바뀐 것이 아니다
+    let before = priority::common_item_order(conn, workspace_id)?;
+    priority::save_common_item_order(conn, workspace_id, order)?;
+    let after = priority::common_item_order(conn, workspace_id)?;
+    if before.order == after.order && before.source != "CONFLICT" {
         return Ok(0);
     }
-    job::clear_after_everywhere(conn, "ITEM_ORDER_CHANGED")
+    Ok(job::clear_after(conn, workspace_id, "ITEM_ORDER_CHANGED")?.len())
 }
 
 // ─────────────────────────────────────────────── 배분 결과

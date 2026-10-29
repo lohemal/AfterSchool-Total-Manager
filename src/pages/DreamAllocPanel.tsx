@@ -387,11 +387,11 @@ function PriorityCard({ workspaceId, onChanged }: { workspaceId: number; onChang
             <b>항목 차례</b> <span className="hint">— {prioritySourceLabel(view.itemSource)}</span>
           </div>
           <div className="hint" style={{ marginBottom: 4 }}>
-            항목 차례는 모든 부서에 동일하게 적용됩니다.
+            항목 차례는 이 작업공간의 모든 부서에 동일하게 적용됩니다.
           </div>
           {view.itemSource === 'CONFLICT' && (
             <Notice tone="warn">
-              예전 버전에서 부서마다 다르게 저장한 항목 차례가 있어 하나로 고르지 않았습니다. 모든 부서에 쓸
+              예전 버전에서 부서마다 다르게 저장한 항목 차례가 있어 하나로 고르지 않았습니다. 이 작업공간의 모든 부서에 쓸
               차례를 확인하고 [항목 차례 저장]을 눌러야 배분할 수 있습니다.
             </Notice>
           )}

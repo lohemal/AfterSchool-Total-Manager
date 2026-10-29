@@ -1267,7 +1267,7 @@ export interface DreamPriorityView {
   deptSource: DreamPrioritySource
   /** 배분할 차례대로 */
   departments: DreamPriorityDept[]
-  /** 공통 항목 차례 — 모든 부서에 같다 */
+  /** 공통 항목 차례 — 이 작업공간의 모든 부서에 같다 */
   items: { code: string; name: string }[]
   itemSource: DreamPrioritySource
   digest: string

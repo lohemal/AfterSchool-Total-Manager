@@ -1,4 +1,4 @@
--- 방과후드림 결제관리 — 적용 학년 · 공통 항목 차례 (P6)
+-- 방과후드림 결제관리 — 적용 학년 · 작업공간별 공통 항목 차례 (P6)
 --
 -- ## 적용 학년
 --
@@ -10,8 +10,10 @@
 --
 -- ## 공통 항목 차례
 --
--- 지원금을 담을 항목 차례(강사료 · 수용비 · 교재비 · 재료비). 모든 부서에 같은 차례를
--- 쓴다(실제 업무에서 부서마다 다르게 두지 않는다). 프로그램 전체에 한 벌이다.
+-- 지원금을 담을 항목 차례(강사료 · 수용비 · 교재비 · 재료비). 한 작업공간 안에서는 모든
+-- 부서에 같은 차례를 쓴다(실제 업무에서 부서마다 다르게 두지 않는다). 작업공간(월)마다
+-- 따로 정할 수 있다. 부서 칸은 두지 않는다 — 부서마다 다른 차례를 담을 수 없는 모양이다.
+-- 작업공간을 지우면 함께 지워진다.
 -- 009 의 부서별 `dream_item_priority` 는 지우지 않는다 — 더는 배분에 쓰지 않고, 공통
 -- 차례를 처음 정할 때 기본값을 제안하는 데만 읽는다. 옮겨 담지도 않는다(부서마다 다르면
 -- 어느 것을 고를지 사람이 정해야 한다).
@@ -26,6 +28,9 @@ CREATE TABLE dream_applied_grade (
 );
 
 CREATE TABLE dream_item_order (
-  item_code   TEXT    PRIMARY KEY REFERENCES cost_item(code),
-  sort_order  INTEGER NOT NULL UNIQUE CHECK (sort_order >= 1)
+  workspace_id  INTEGER NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
+  item_code     TEXT    NOT NULL REFERENCES cost_item(code),
+  sort_order    INTEGER NOT NULL CHECK (sort_order >= 1),
+  PRIMARY KEY (workspace_id, item_code),
+  UNIQUE (workspace_id, sort_order)
 );

@@ -2224,7 +2224,7 @@ mod p3 {
             let _ = art;
             let n = f
                 .db
-                .write(|c| allocation::save_common_item_order(c, &[수용비.into(), 강사료.into()]))
+                .write(|c| allocation::save_common_item_order(c, f.ws, &[수용비.into(), 강사료.into()]))
                 .unwrap();
             assert_eq!(n, 1);
             assert_eq!(verify(&f, s.job_id, &bytes).status, "STALE");
@@ -2239,7 +2239,7 @@ mod p3 {
             // 같은 차례를 다시 저장하면 결과를 비우지 않는다
             let n = f
                 .db
-                .write(|c| allocation::save_common_item_order(c, &[수용비.into(), 강사료.into()]))
+                .write(|c| allocation::save_common_item_order(c, f.ws, &[수용비.into(), 강사료.into()]))
                 .unwrap();
             assert_eq!(n, 0);
             assert_eq!(verify(&f, s.job_id, &bytes).status, "DONE");
@@ -2638,7 +2638,7 @@ mod p3 {
                 let (job, bytes, src) = ready(&f, full_rows(), &dir);
                 let art = f.dp["미술"];
                 let _ = art;
-                f.db.write(|c| allocation::save_common_item_order(c, &[수용비.into(), 강사료.into()])).unwrap();
+                f.db.write(|c| allocation::save_common_item_order(c, f.ws, &[수용비.into(), 강사료.into()])).unwrap();
                 let e = export_to(&f, job, &bytes, &src, &dir.path("결과.xlsx"), DATE).unwrap_err();
                 assert_eq!(e.code, "ALLOCATION_STALE");
                 assert!(!dir.path("결과.xlsx").exists());
@@ -3244,7 +3244,7 @@ mod p3 {
                 let r = allocate(&f, s.job_id, &bytes);
                 assert_eq!((r.status, r.issues[0].code), ("FAILED", allocation::code::ITEM_ORDER_NOT_CONFIRMED));
                 // 공통 차례를 저장하면 그것만 쓴다 — 예전 부서별 차례(로봇 강사료 먼저)는 보지 않는다
-                f.db.write(|c| allocation::save_common_item_order(c, &b)).unwrap();
+                f.db.write(|c| allocation::save_common_item_order(c, f.ws, &b)).unwrap();
                 let o = f.db.read(|c| priority::common_item_order(c, f.ws)).unwrap();
                 assert_eq!((o.source, o.order.clone()), ("DREAM", b.clone()));
                 let s = f.db.write(|c| session::revalidate(c, s.job_id, &bytes)).unwrap();
@@ -3255,6 +3255,59 @@ mod p3 {
                 assert_eq!(first_paid.item_code, 수용비);
                 assert_eq!(cnt(&f.db, "SELECT COUNT(*) FROM dream_item_priority"), 8, "예전 표는 지우지 않는다");
                 assert_eq!(f.state(), "FRESH");
+            }
+
+            #[test]
+            fn 항목_차례는_작업공간마다_따로이고_한쪽을_바꿔도_다른_쪽은_그대로다() {
+                let f = F::mixed();
+                setup(&f);
+                let a_ws = f.ws;
+                let b_ws = f.workspace("11월", "2026-11-01", "2026-11-30");
+                let bytes = xlsx(full_rows());
+                let s = confirmed(&f, &bytes);
+                assert_eq!(allocate(&f, s.job_id, &bytes).status, "DONE");
+                let order = |ws: i64| f.db.read(|c| priority::common_item_order(c, ws)).unwrap();
+                let dv = ws_versions(&f);
+                let a_order: Vec<String> = vec![강사료.into(), 수용비.into(), 교재비.into(), 재료비.into()];
+                let b_order: Vec<String> = vec![재료비.into(), 교재비.into(), 수용비.into(), 강사료.into()];
+
+                // B 를 저장해도 A 의 배분은 그대로 유효하다
+                assert_eq!(f.db.write(|c| allocation::save_common_item_order(c, b_ws, &b_order)).unwrap(), 0);
+                assert_eq!(verify(&f, s.job_id, &bytes).status, "DONE");
+                assert_eq!((order(b_ws).source, order(b_ws).order), ("DREAM", b_order.clone()));
+                assert_eq!(order(a_ws).source, "DEFAULT");
+                // A 에 지금 쓰던 차례(기본값)를 그대로 저장하는 것은 바뀐 것이 아니다
+                assert_eq!(f.db.write(|c| allocation::save_common_item_order(c, a_ws, &a_order)).unwrap(), 0);
+                assert_eq!(verify(&f, s.job_id, &bytes).status, "DONE");
+                // A → B → A 로 읽어도 각자 제 차례
+                assert_eq!(order(a_ws).order, a_order);
+                assert_eq!(order(b_ws).order, b_order);
+                assert_eq!(order(a_ws).order, a_order);
+                // A 를 바꾸면 A 만 다시 계산 — B 의 차례는 그대로
+                let a2: Vec<String> = vec![재료비.into(), 강사료.into(), 수용비.into(), 교재비.into()];
+                assert_eq!(f.db.write(|c| allocation::save_common_item_order(c, a_ws, &a2)).unwrap(), 1);
+                assert_eq!(verify(&f, s.job_id, &bytes).status, "STALE");
+                assert_eq!(order(a_ws).order, a2);
+                assert_eq!(order(b_ws).order, b_order);
+                // 같은 작업공간의 모든 부서에 같은 차례 — 배분 근거 표시도 부서마다 같다
+                let r = allocate(&f, s.job_id, &bytes);
+                assert_eq!(r.status, "DONE");
+                let names: Vec<String> = a2.iter().map(|c| crate::domain::dream::ITEMS.iter().find(|x| x.2 == c).unwrap().1.to_string()).collect();
+                assert!(r.students.iter().flat_map(|st| &st.order).all(|d| d.items == names));
+                // 정산 · 자료판은 그대로
+                assert_eq!(ws_versions(&f), dv);
+                assert_eq!(f.state(), "FRESH");
+                // B 를 지우면 B 의 차례도 사라지고, 같은 id 로 새 작업공간이 생겨도 물려받지 않는다
+                f.db.write(|c| {
+                    c.execute("DELETE FROM workspace WHERE id = ?1", [b_ws])?;
+                    Ok(())
+                })
+                .unwrap();
+                assert_eq!(cnt(&f.db, &format!("SELECT COUNT(*) FROM dream_item_order WHERE workspace_id = {b_ws}")), 0);
+                assert_eq!(cnt(&f.db, &format!("SELECT COUNT(*) FROM dream_item_order WHERE workspace_id = {a_ws}")), 4);
+                let c_ws = f.workspace("12월", "2026-12-01", "2026-12-31");
+                assert_ne!(order(c_ws).source, "DREAM", "새 작업공간({c_ws})이 지운 작업공간({b_ws})의 차례를 물려받았다");
+                assert!(f.db.read(|c| workspace_setting::applied_grades(c, c_ws)).unwrap().is_empty());
             }
         }
     }

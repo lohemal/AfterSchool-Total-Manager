@@ -323,6 +323,9 @@ fn 열면_011_이_적용되고_기존_방과후드림_자료와_정산은_그대
         assert_eq!(ok, "ok");
         // 작업공간을 지우면 적용 학년도 함께 사라진다
         crate::repo::dream::workspace_setting::set_applied_grades(c, ws, &[3])?;
+        crate::repo::dream::priority::save_common_item_order(c, ws, &["OPERATION".to_string()])?;
+        let o = crate::repo::dream::priority::common_item_order(c, ws)?;
+        assert_eq!((o.source, o.order[0].as_str()), ("DREAM", "OPERATION"));
         Ok(())
     })
     .unwrap();
@@ -330,6 +333,8 @@ fn 열면_011_이_적용되고_기존_방과후드림_자료와_정산은_그대
         c.execute("DELETE FROM workspace WHERE id = ?1", [ws])?;
         let n: i64 = c.query_row("SELECT COUNT(*) FROM dream_applied_grade", [], |r| r.get(0))?;
         assert_eq!(n, 0);
+        let n: i64 = c.query_row("SELECT COUNT(*) FROM dream_item_order", [], |r| r.get(0))?;
+        assert_eq!(n, 0, "작업공간을 지우면 그 항목 차례도 사라진다");
         Ok(())
     })
     .unwrap();

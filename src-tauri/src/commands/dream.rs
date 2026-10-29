@@ -304,11 +304,12 @@ pub fn dream_save_dept_priority(db: State<'_, Db>, workspace_id: i64, order: Vec
     })
 }
 
-/// 공통 항목 차례 저장(모든 부서 · 모든 작업공간). 바뀌었으면 진행 중 작업의 배분 결과를 비운다.
+/// 이 작업공간의 공통 항목 차례 저장(그 작업공간의 모든 부서). 바뀌었으면 이 작업공간에서
+/// 진행 중인 작업의 배분 결과만 비운다.
 #[tauri::command]
 pub fn dream_save_item_order(db: State<'_, Db>, workspace_id: i64, order: Vec<String>) -> AppResult<PriorityView> {
     db.write(|c| {
-        allocation::save_common_item_order(c, &order)?;
+        allocation::save_common_item_order(c, workspace_id, &order)?;
         allocation::priority_view(c, workspace_id)
     })
 }

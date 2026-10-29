@@ -252,20 +252,6 @@ pub fn stored_after(conn: &Connection, job_id: i64) -> AppResult<Vec<StoredAfter
     Ok(rows)
 }
 
-/// 모든 작업공간에서 끝나지 않은 작업의 배분 결과를 비운다 — 공통 항목 차례(프로그램 전체 한 벌)를
-/// 바꿨을 때. 돌려주는 값은 결과가 있었던 작업 수.
-pub fn clear_after_everywhere(conn: &Connection, why: &str) -> AppResult<usize> {
-    let wss: Vec<i64> = conn
-        .prepare("SELECT DISTINCT workspace_id FROM dream_job WHERE status IN ('OPEN', 'BLOCKED', 'READY')")?
-        .query_map([], |r| r.get(0))?
-        .collect::<rusqlite::Result<_>>()?;
-    let mut n = 0;
-    for ws in wss {
-        n += clear_after(conn, ws, why)?.len();
-    }
-    Ok(n)
-}
-
 /// 이 작업공간에서 끝나지 않은 작업을 모두 닫는다(FAILED) — 적용 학년처럼 검증 대상 자체가
 /// 바뀌어 그 작업의 매칭 · 배분을 다시 쓸 수 없을 때. 배분 결과도 비운다. 기록은 지우지 않는다.
 pub fn close_open(conn: &Connection, workspace_id: i64, why: &str) -> AppResult<usize> {

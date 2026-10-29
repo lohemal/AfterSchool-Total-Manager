@@ -166,7 +166,7 @@ pub fn item_order(conn: &Connection, department_id: i64) -> AppResult<Vec<String
 
 // ─────────────────────────────────────────────── 공통 항목 차례 (P6, 011)
 //
-// 항목 차례는 **모든 부서에 같다**. 프로그램 전체에 한 벌(`dream_item_order`).
+// 항목 차례는 한 작업공간 안의 **모든 부서에 같다**. 작업공간마다 한 벌(`dream_item_order`).
 // 저장한 것이 없을 때 쓰는 차례(결정적):
 //
 // ```text
@@ -195,10 +195,7 @@ fn complete(mut order: Vec<String>, fill: &[String]) -> Vec<String> {
 
 pub fn common_item_order(conn: &Connection, workspace_id: i64) -> AppResult<ItemOrder> {
     let settle = repo::priority::item_order(conn, workspace_id)?; // 기존 정산 순위(없으면 비용항목 차례)
-    let saved: Vec<String> = conn
-        .prepare("SELECT item_code FROM dream_item_order ORDER BY sort_order")?
-        .query_map([], |r| r.get(0))?
-        .collect::<rusqlite::Result<_>>()?;
+    let saved = saved_item_order(conn, workspace_id)?;
     if !saved.is_empty() {
         return Ok(ItemOrder {
             order: complete(saved, &settle),
@@ -240,9 +237,21 @@ pub fn common_item_order(conn: &Connection, workspace_id: i64) -> AppResult<Item
     }
 }
 
-/// 공통 항목 차례 저장(모든 부서 · 모든 작업공간). 빠진 항목은 지금 차례대로 뒤에 붙인다.
-/// 돌려주는 값은 저장된 차례가 실제로 바뀌었는가.
-pub fn save_common_item_order(conn: &Connection, order: &[String]) -> AppResult<bool> {
+fn saved_item_order(conn: &Connection, workspace_id: i64) -> AppResult<Vec<String>> {
+    let v = conn
+        .prepare("SELECT item_code FROM dream_item_order WHERE workspace_id = ?1 ORDER BY sort_order")?
+        .query_map(params![workspace_id], |r| r.get(0))?
+        .collect::<rusqlite::Result<_>>()?;
+    Ok(v)
+}
+
+/// 이 작업공간의 공통 항목 차례 저장(그 작업공간의 모든 부서). 빠진 항목은 비용항목 차례대로
+/// 뒤에 붙인다. 다른 작업공간에는 영향이 없다. 돌려주는 값은 저장된 차례가 실제로 바뀌었는가.
+pub fn save_common_item_order(conn: &Connection, workspace_id: i64, order: &[String]) -> AppResult<bool> {
+    let n: i64 = conn.query_row("SELECT COUNT(*) FROM workspace WHERE id = ?1", params![workspace_id], |r| r.get(0))?;
+    if n == 0 {
+        return Err(AppError::not_found("작업공간을 찾지 못했습니다."));
+    }
     let known: Vec<String> = repo::cost_items(conn)?.into_iter().map(|i| i.code).collect();
     let mut seen = HashSet::new();
     for code in order {
@@ -254,18 +263,14 @@ pub fn save_common_item_order(conn: &Connection, order: &[String]) -> AppResult<
         }
     }
     let full = complete(order.to_vec(), &known);
-    let before: Vec<String> = conn
-        .prepare("SELECT item_code FROM dream_item_order ORDER BY sort_order")?
-        .query_map([], |r| r.get(0))?
-        .collect::<rusqlite::Result<_>>()?;
-    if before == full {
+    if saved_item_order(conn, workspace_id)? == full {
         return Ok(false);
     }
-    conn.execute("DELETE FROM dream_item_order", [])?;
+    conn.execute("DELETE FROM dream_item_order WHERE workspace_id = ?1", params![workspace_id])?;
     for (i, code) in full.iter().enumerate() {
         conn.execute(
-            "INSERT INTO dream_item_order (item_code, sort_order) VALUES (?1, ?2)",
-            params![code, i as i64 + 1],
+            "INSERT INTO dream_item_order (workspace_id, item_code, sort_order) VALUES (?1, ?2, ?3)",
+            params![workspace_id, code, i as i64 + 1],
         )?;
     }
     Ok(true)
