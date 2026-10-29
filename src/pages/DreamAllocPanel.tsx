@@ -28,7 +28,16 @@ import type {
   DreamSession,
   DreamTotals,
 } from '@/ipc/types'
-import { allocIssueText, move, prioritySourceLabel, resultFileName, transferDateCode } from '@/lib/dream'
+import {
+  allocIssueText,
+  demoteExport,
+  exportView,
+  move,
+  prioritySourceLabel,
+  resultFileName,
+  transferDateCode,
+} from '@/lib/dream'
+import type { ExportView, MadeExport } from '@/lib/dream'
 
 const won = (n: number) => n.toLocaleString('ko-KR')
 
@@ -51,6 +60,12 @@ export function DreamAllocPanel({
   const [result, setResult] = useState<DreamAllocation | null>(null)
   const [staleWhy, setStaleWhy] = useState<string | null>(null)
   const [date, setDate] = useState('')
+  const [made, setMade] = useState<MadeExport | null>(null)
+  // 배분 결과가 바뀌면(무효 · 다시 계산) 이미 만든 결과 파일은 '이전 생성 결과'로 내린다
+  const replaceResult = (a: DreamAllocation | null) => {
+    setResult(a)
+    setMade(demoteExport)
+  }
   // 매칭 쪽에서 무엇이든 다시 하면(다시 검증 · 확인) 이전 배분 결과는 버린다.
   // 배분 계산 자체가 돌려준 매칭 결과로 바뀐 것만 예외다.
   const own = useRef<DreamSession | null>(null)
@@ -58,7 +73,7 @@ export function DreamAllocPanel({
   had.current = result !== null
   useEffect(() => {
     if (session !== own.current && had.current) {
-      setResult(null)
+      replaceResult(null)
       setStaleWhy('매칭 결과가 다시 계산되어 이전 배분 결과는 쓰지 않습니다.')
     }
   }, [session])
@@ -66,7 +81,7 @@ export function DreamAllocPanel({
   const run = useMutation({
     mutationFn: () => api.dreamAllocate(session.jobId, path),
     onSuccess: (a) => {
-      setResult(a)
+      replaceResult(a)
       setStaleWhy(null)
       if (a.session) {
         own.current = a.session
@@ -76,7 +91,6 @@ export function DreamAllocPanel({
     onError,
   })
 
-  const [made, setMade] = useState<DreamExport | null>(null)
   const toast = useToast()
   const exportFile = useMutation({
     mutationFn: async (transferDate: string) => {
@@ -91,14 +105,19 @@ export function DreamAllocPanel({
     },
     onSuccess: (r) => {
       if (!r) return
-      setMade(r)
+      setMade({
+        result: r,
+        fingerprint: result?.fingerprint ?? null,
+        madeAt: new Date().toLocaleString('ko-KR'),
+        current: true,
+      })
       if (r.historySaved) toast.ok(`결과 파일을 저장했습니다.\n${r.written.fileName}`)
       else toast.bad(r.historyError ?? '결과 파일은 생성되었지만 처리 이력을 저장하지 못했습니다.')
     },
     onError: (e) => {
       const c = (e as { code?: string }).code ?? ''
       if (c === 'ALLOCATION_STALE' || c === 'EXPORT_INCONSISTENT') {
-        setResult(null)
+        replaceResult(null)
         setStaleWhy('배분 결과가 현재 자료와 일치하지 않습니다. 다시 검증 · 계산한 뒤 결과 파일을 만들어 주세요.')
       }
       onError(e)
@@ -113,7 +132,7 @@ export function DreamAllocPanel({
         workspaceId={workspaceId}
         onChanged={() => {
           if (result) {
-            setResult(null)
+            replaceResult(null)
             setStaleWhy('배분 우선순위가 바뀌어 이전 배분 결과는 쓰지 않습니다.')
           }
         }}
@@ -206,9 +225,35 @@ export function DreamAllocPanel({
             자리에는 저장하지 않습니다. 만든 파일을 다시 읽어 확인한 뒤에만 저장합니다.
           </div>
         )}
-        {made && <ExportDone r={made} />}
+        {made && <ExportState m={made} view={exportView(made, result, code)} picked={code} />}
       </Card>
     </>
+  )
+}
+
+/** 만든 결과 파일 — 지금 결과일 때만 성공으로, 아니면 '이전 생성 결과'로 보여 준다. */
+function ExportState({ m, view, picked }: { m: MadeExport; view: ExportView; picked: string | null }) {
+  if (view === 'CURRENT') return <ExportDone r={m.result} />
+  const r = m.result
+  return (
+    <div style={{ marginTop: 10 }}>
+      <Notice tone="warn">
+        {view === 'PREVIOUS' ? (
+          <>
+            이전에 결과 파일을 생성했지만 배분 조건이 변경되었습니다. 다시 배분 계산한 뒤 새 결과 파일을 생성해
+            주세요.
+          </>
+        ) : (
+          <>
+            이전 결과 파일은 이체예정일 {r.transferDate}로 만들었습니다. 지금 고른 이체예정일
+            {picked ? `(${picked})` : ''}로 만들려면 [결과 Excel 생성]을 다시 눌러 주세요.
+          </>
+        )}
+        <div className="hint" style={{ marginTop: 4 }}>
+          이전 생성 결과: {r.written.fileName} · 이체예정일 {r.transferDate} · {m.madeAt}
+        </div>
+      </Notice>
+    </div>
   )
 }
 

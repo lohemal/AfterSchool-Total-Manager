@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest'
 
-import type { DreamIssue } from '@/ipc/types'
+import type { DreamExport, DreamIssue } from '@/ipc/types'
 
 import {
   allocIssueText,
   cellText,
+  demoteExport,
   DREAM_HEADERS,
+  exportView,
   issueText,
   matchStateLabel,
   monthCode,
@@ -17,6 +19,7 @@ import {
   statusLabel,
   transferDateCode,
 } from './dream'
+import type { MadeExport } from './dream'
 
 const issue = (o: Partial<DreamIssue>): DreamIssue => ({
   code: 'INVALID_CELL_TYPE',
@@ -120,5 +123,50 @@ describe('방과후드림 배분 (P4)', () => {
     )
     expect(allocIssueText({ code: 'X', row: null, detail: null })).toBe('알 수 없는 문제(X)')
     expect(prioritySourceLabel('SETTLEMENT')).toBe('기존 정산 순위(기본값)')
+  })
+})
+
+describe('결과 파일 표시 — 지금 결과인가, 이전 결과인가', () => {
+  const made = (fp: string, date: string): MadeExport => ({
+    result: { transferDate: date, written: { fileName: '결과.xlsx' } } as unknown as DreamExport,
+    fingerprint: fp,
+    madeAt: '2026. 10. 29.',
+    current: true,
+  })
+  const done = (fp: string) => ({ status: 'DONE' as const, fingerprint: fp })
+
+  it('A — 배분 완료 뒤 만든 파일은 지금 결과', () => {
+    expect(exportView(made('f1', '20261030'), done('f1'), '20261030')).toBe('CURRENT')
+    expect(exportView(null, done('f1'), '20261030')).toBe('NONE')
+  })
+
+  it('B — 우선순위를 바꿔 배분이 무효가 되면 이전 결과', () => {
+    const m = demoteExport(made('f1', '20261030'))
+    expect(exportView(m, null, '20261030')).toBe('PREVIOUS')
+    // 무효가 된 배분(STALE)이나 지문이 다른 배분이어도
+    expect(exportView(made('f1', '20261030'), { status: 'STALE', fingerprint: 'f1' }, '20261030')).toBe('PREVIOUS')
+    expect(exportView(made('f1', '20261030'), done('f2'), '20261030')).toBe('PREVIOUS')
+  })
+
+  it('C — 다시 계산만 하면(지문이 같아도) 이전 결과가 지금 결과로 돌아오지 않는다', () => {
+    let m: MadeExport | null = made('f1', '20261030')
+    m = demoteExport(m) // 우선순위 바뀜
+    m = demoteExport(m) // 다시 계산
+    expect(m?.current).toBe(false)
+    expect(exportView(m, done('f1'), '20261030')).toBe('PREVIOUS')
+  })
+
+  it('D — 새로 만들면 새 파일이 지금 결과', () => {
+    const fresh = made('f2', '20261105')
+    expect(exportView(fresh, done('f2'), '20261105')).toBe('CURRENT')
+  })
+
+  it('E — 이체예정일만 바꾸면 배분은 그대로지만 그 날짜의 결과는 아직 없다', () => {
+    const m = made('f1', '20261030')
+    expect(exportView(m, done('f1'), '20261105')).toBe('OTHER_DATE')
+    expect(exportView(m, done('f1'), null)).toBe('OTHER_DATE')
+    // 날짜를 되돌리면 배분이 그대로이므로 그 파일이 다시 지금 결과다
+    expect(exportView(m, done('f1'), '20261030')).toBe('CURRENT')
+    expect(demoteExport(null)).toBeNull()
   })
 })

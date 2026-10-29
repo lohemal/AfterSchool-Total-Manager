@@ -9,7 +9,9 @@
  */
 
 import type {
+  DreamAllocation,
   DreamAllocIssue,
+  DreamExport,
   DreamIssue,
   DreamMatchState,
   DreamPrioritySource,
@@ -216,6 +218,38 @@ export function move<T>(list: T[], index: number, by: -1 | 1): T[] {
   const out = list.slice()
   ;[out[index], out[to]] = [out[to], out[index]]
   return out
+}
+
+/**
+ * 이 화면에서 만든 결과 파일. `current` 는 만든 뒤로 배분이 무효가 되거나 다시 계산된 적이
+ * 없는가 — 한 번 내려가면 다시 올라가지 않는다(배분을 다시 계산했다고 예전 파일이 지금 결과가
+ * 되지 않는다). 처리 이력(DB)은 건드리지 않는 화면 상태다.
+ */
+export interface MadeExport {
+  result: DreamExport
+  /** 만들 때의 배분 지문 */
+  fingerprint: string | null
+  madeAt: string
+  current: boolean
+}
+
+/** `CURRENT` 지금 결과 · `PREVIOUS` 배분이 바뀐 뒤의 이전 결과 · `OTHER_DATE` 이체예정일만 다름 */
+export type ExportView = 'NONE' | 'CURRENT' | 'PREVIOUS' | 'OTHER_DATE'
+
+/** 배분이 무효가 되거나 다시 계산되면 — 이전 결과 파일을 '이전 생성 결과'로 내린다. */
+export function demoteExport(m: MadeExport | null): MadeExport | null {
+  return m && m.current ? { ...m, current: false } : m
+}
+
+export function exportView(
+  m: MadeExport | null,
+  alloc: Pick<DreamAllocation, 'status' | 'fingerprint'> | null,
+  transferDate: string | null,
+): ExportView {
+  if (!m) return 'NONE'
+  if (!m.current || alloc?.status !== 'DONE' || alloc.fingerprint !== m.fingerprint) return 'PREVIOUS'
+  if (transferDate !== m.result.transferDate) return 'OTHER_DATE'
+  return 'CURRENT'
 }
 
 /**
