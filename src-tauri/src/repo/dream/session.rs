@@ -22,7 +22,7 @@ use crate::error::{AppError, AppResult};
 use crate::excel::dream_file;
 use crate::repo::dream::matching::{self, Matching, State};
 use crate::repo::dream::reset::{self, KeyStatus};
-use crate::repo::dream::{amount, course, file_check, identity, job};
+use crate::repo::dream::{amount, course, file_check, identity, job, workspace_setting};
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -163,6 +163,10 @@ pub fn start(
         return Err(file_changed());
     }
     let file = parse_ok(conn, workspace_id, file_name, bytes)?;
+    let grades = workspace_setting::applied_grades(conn, workspace_id)?;
+    if grades.is_empty() {
+        return Err(AppError::new("APPLIED_GRADES_NOT_SET", "방과후드림 적용 학년을 1개 이상 선택해 주세요."));
+    }
     let key = usable_key(conn)?;
     let fresh = amount::fresh_settlement(conn, workspace_id)?; // NONE · STALE_* 는 여기서 거절
     let job_id = job::create(
@@ -176,7 +180,8 @@ pub fn start(
             app_version,
         },
     )?;
-    job::add_event(conn, job_id, "START", &format!("rows={}", file.rows.len()))?;
+    let g = grades.iter().map(|g| g.to_string()).collect::<Vec<_>>().join(",");
+    job::add_event(conn, job_id, "START", &format!("rows={} grades={g}", file.rows.len()))?;
     let m = matching::run(conn, workspace_id, &file, key.as_ref())?;
     finish(conn, job_id, &file, m)
 }
@@ -317,4 +322,72 @@ pub fn confirm_course(conn: &Connection, job_id: i64, bytes: &[u8], course_code:
     course::set(conn, department_id, course_code)?;
     job::add_event(conn, job_id, "CONFIRM_COURSE", course_code)?;
     Ok(())
+}
+
+/// 강좌코드 연결을 **한꺼번에** 확정한다 — `(강좌명코드, 부서 id)` 여럿. 하나라도 안 되면 아무것도
+/// 저장하지 않는다(호출하는 쪽의 트랜잭션이 되돌린다 — 반쯤 저장된 상태가 남지 않는다).
+///
+/// 사람이 표에서 고른 것만 받는다. 추천은 화면 기본값일 뿐 여기서 짐작해 채우지 않는다.
+/// 이미 연결된 코드를 다른 부서로 바꾸는 것도 받는다. 바꾼 뒤의 연결 전체가 작업공간 안에서
+/// **코드 하나 ↔ 부서 하나**여야 한다. 돌려주는 값은 실제로 새로 잇거나 바꾼 수(같은 연결은 0).
+pub fn confirm_courses(conn: &Connection, job_id: i64, bytes: &[u8], picks: &[(String, i64)]) -> AppResult<usize> {
+    let head = check_job(conn, job_id, bytes)?;
+    let file = parse_ok(conn, head.workspace_id, &head.source_name, bytes)?;
+    let ws = head.workspace_id;
+    if picks.is_empty() {
+        return Err(AppError::invalid("연결할 강좌를 골라 주세요."));
+    }
+    let mut codes = std::collections::HashSet::new();
+    for (code, dept) in picks {
+        if !file.rows.iter().any(|r| r.course_code.as_deref() == Some(code.as_str())) {
+            return Err(AppError::invalid(format!("이 파일에 없는 강좌명코드입니다({code}).")));
+        }
+        if !codes.insert(code.as_str()) {
+            return Err(AppError::invalid(format!("같은 강좌명코드를 두 번 골랐습니다({code}).")));
+        }
+        let dws: Option<i64> = rusqlite::OptionalExtension::optional(conn.query_row(
+            "SELECT workspace_id FROM department WHERE id = ?1",
+            [dept],
+            |r| r.get(0),
+        ))?;
+        if dws != Some(ws) {
+            return Err(AppError::invalid("이 작업공간의 부서가 아닌 것이 들어 있습니다."));
+        }
+    }
+    // 바꾼 뒤의 연결 전체 — 코드 → 부서
+    let mut fin: HashMap<String, i64> = course::list(conn, ws)?
+        .into_iter()
+        .map(|m| (m.course_code, m.department_id))
+        .collect();
+    let mut changed = 0;
+    for (code, dept) in picks {
+        if fin.get(code) != Some(dept) {
+            changed += 1;
+        }
+        fin.insert(code.clone(), *dept);
+    }
+    let mut owner: HashMap<i64, &str> = HashMap::new();
+    for (code, dept) in &fin {
+        if let Some(other) = owner.insert(*dept, code.as_str()) {
+            return Err(AppError::new(
+                "CONFLICT",
+                format!("한 부서에 강좌명코드 두 개({other}, {code})를 연결할 수 없습니다. 아무것도 저장하지 않았습니다."),
+            ));
+        }
+    }
+    if changed == 0 {
+        return Ok(0);
+    }
+    // 고른 코드의 옛 연결을 지우고 새로 잇는다(위에서 1:1 을 확인했으므로 부딪히지 않는다)
+    for (code, _) in picks {
+        conn.execute(
+            "DELETE FROM dream_course_map WHERE workspace_id = ?1 AND course_code = ?2",
+            rusqlite::params![ws, code],
+        )?;
+    }
+    for (code, dept) in picks {
+        course::set(conn, *dept, code)?;
+    }
+    job::add_event(conn, job_id, "CONFIRM_COURSES", &format!("count={} changed={changed}", picks.len()))?;
+    Ok(changed)
 }

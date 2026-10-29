@@ -21,9 +21,11 @@ import {
   cellText,
   DREAM_HEADERS,
   DREAM_LETTERS,
+  gradesLabel,
   issueText,
   monthCode,
   monthLabel,
+  sameGrades,
   statusLabel,
 } from '@/lib/dream'
 import { useApp } from '@/lib/useApp'
@@ -109,7 +111,9 @@ export function DreamPaymentPage() {
         <>
           <Issues c={check.data} />
           {check.data.rows.length > 0 && <Preview c={check.data} />}
-          {path && <DreamMatchPanel workspaceId={wsId} path={path} check={check.data} />}
+          {path && (
+            <DreamMatchPanel workspaceId={wsId} path={path} check={check.data} grades={settings.data?.appliedGrades ?? []} />
+          )}
         </>
       )}
     </div>
@@ -144,6 +148,21 @@ function BasicInfo() {
     mutationFn: () => api.dreamSetOrgCode(org),
     onSuccess: (v) => {
       toast.ok(`기관코드를 ${v} 로 저장했습니다.`)
+      void qc.invalidateQueries({ queryKey: ['dream-settings'] })
+    },
+    onError: (e) => toast.bad(errorMessage(e)),
+  })
+  const [grades, setGrades] = useState<number[]>([])
+  useEffect(() => setGrades(s?.appliedGrades ?? []), [s])
+  const saveGrades = useMutation({
+    mutationFn: () => api.dreamSetAppliedGrades(wsId, grades),
+    onSuccess: (r) => {
+      if (!r.changed) toast.ok('적용 학년이 그대로입니다.')
+      else
+        toast.ok(
+          `방과후드림 적용 학년을 ${gradesLabel(r.grades)}으로 저장했습니다.` +
+            (r.closedJobs > 0 ? ' 진행 중이던 매칭 · 배분은 다시 해야 합니다.' : ''),
+        )
       void qc.invalidateQueries({ queryKey: ['dream-settings'] })
     },
     onError: (e) => toast.bad(errorMessage(e)),
@@ -215,9 +234,47 @@ function BasicInfo() {
           </div>
         </Field>
       </div>
+      <div style={{ marginTop: 10 }}>
+        <Field label="방과후드림 적용 학년">
+          <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap', lineHeight: '30px' }}>
+            {s.gradeChoices.map((g) => (
+              <label key={g} style={{ display: 'inline-flex', gap: 4, alignItems: 'center', cursor: 'pointer' }}>
+                <input
+                  type="checkbox"
+                  checked={grades.includes(g)}
+                  onChange={(e) => setGrades(e.target.checked ? [...grades, g] : grades.filter((x) => x !== g))}
+                />
+                {g}학년
+              </label>
+            ))}
+            <Button
+              onClick={() => saveGrades.mutate()}
+              disabled={saveGrades.isPending || grades.length === 0 || sameGrades(grades, s.appliedGrades)}
+            >
+              저장
+            </Button>
+            <span className="hint">현재: {gradesLabel(s.appliedGrades)}</span>
+          </div>
+        </Field>
+        <div className="hint">
+          방과후드림을 사용하는 학년을 선택하세요. 선택한 학년의 정산 대상 학생만 결제파일과 대조합니다.
+        </div>
+        {grades.length === 0 && (
+          <Notice tone="warn">방과후드림 적용 학년을 1개 이상 선택해 주세요.</Notice>
+        )}
+        {s.appliedGrades.length === 0 && s.suggestedGrades && (
+          <div className="hint" style={{ marginTop: 4 }}>
+            직전 작업공간({s.suggestedGrades[0]})에서는 {gradesLabel(s.suggestedGrades[1])}을 썼습니다.{' '}
+            <Button small onClick={() => setGrades(s.suggestedGrades![1])}>
+              그대로 고르기
+            </Button>{' '}
+            (고른 뒤 [저장]을 눌러야 적용됩니다)
+          </div>
+        )}
+      </div>
       <div className="hint" style={{ marginTop: 6 }}>
-        결제 기준월은 작업공간마다 따로 정합니다. 작업공간 기간으로 짐작하지 않습니다. 기관코드 ·
-        결제 기준월을 바꿔도 정산 결과에는 영향이 없습니다.
+        결제 기준월 · 적용 학년은 작업공간마다 따로 정합니다. 작업공간 기간으로 짐작하지 않습니다. 기관코드 ·
+        결제 기준월 · 적용 학년을 바꿔도 정산 결과에는 영향이 없습니다.
       </div>
     </Card>
   )

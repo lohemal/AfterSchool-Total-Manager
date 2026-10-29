@@ -1064,6 +1064,18 @@ export interface DreamSettings {
   orgCode: string | null
   /** YYYYMM */
   billingMonth: string | null
+  /** 방과후드림 적용 학년(비어 있으면 미설정) */
+  appliedGrades: number[]
+  /** 고를 수 있는 학년 */
+  gradeChoices: number[]
+  /** 제안 — 앞선 작업공간의 적용 학년 [작업공간 이름, 학년]. 저장된 것이 아니다 */
+  suggestedGrades: [string, number[]] | null
+}
+
+export interface DreamGradesSaved {
+  grades: number[]
+  changed: boolean
+  closedJobs: number
 }
 
 export type DreamSeverity = 'INFO' | 'REVIEW' | 'ERROR'
@@ -1210,8 +1222,14 @@ export interface DreamMatching {
   absent: DreamAbsentStudent[]
   /** 파일 ΣN */
   fileTotal: number
-  /** 최신 정산 전체 T */
+  /** 적용 학년 정산 T 합(학교 전체가 아니다) */
   settlementTotal: number
+  /** 방과후드림 적용 학년(비어 있으면 미설정) */
+  appliedGrades: number[]
+  /** 검증 대상 학생 수 — 적용 학년에서 정산 금액이 남은 학생 */
+  universeStudents: number
+  /** 적용 학년이 아닌데 파일에 있는 학생 [학년, 학생 수] */
+  outside: [number, number][]
   p4Ready: boolean
 }
 
@@ -1233,20 +1251,25 @@ export interface DreamSession {
 // ─────────────────────────────────────────────── 방과후드림 P4 — 우선순위 · 배분
 
 /** DREAM(방과후드림 순위) · SETTLEMENT(기존 정산 순위를 기본값으로) · DEFAULT(정해진 차례) */
-export type DreamPrioritySource = 'DREAM' | 'SETTLEMENT' | 'DEFAULT'
+/**
+ * DREAM(방과후드림 순위) · LEGACY(v0.1.11 부서별 차례가 모두 같아 그대로) · CONFLICT(부서마다
+ * 달라 공통 차례를 저장해야 배분) · SETTLEMENT(기존 정산 순위를 기본값으로) · DEFAULT
+ */
+export type DreamPrioritySource = 'DREAM' | 'LEGACY' | 'CONFLICT' | 'SETTLEMENT' | 'DEFAULT'
 
 export interface DreamPriorityDept {
   departmentId: number
   label: string
   inUse: boolean
-  itemSource: DreamPrioritySource
-  items: { code: string; name: string }[]
 }
 
 export interface DreamPriorityView {
   deptSource: DreamPrioritySource
   /** 배분할 차례대로 */
   departments: DreamPriorityDept[]
+  /** 공통 항목 차례 — 모든 부서에 같다 */
+  items: { code: string; name: string }[]
+  itemSource: DreamPrioritySource
   digest: string
 }
 
@@ -1300,6 +1323,8 @@ export interface DreamAllocation {
   before: DreamTotals
   after: DreamTotals
   settlement: DreamTotals
+  /** 이 결과가 다룬 방과후드림 적용 학년 */
+  appliedGrades: number[]
   priorityDigest: string
   fingerprint: string | null
 }
@@ -1327,6 +1352,7 @@ export interface DreamExport {
   students: number
   totals: DreamTotals
   transferDate: string
+  appliedGrades: number[]
   historySaved: boolean
   historyError: string | null
 }

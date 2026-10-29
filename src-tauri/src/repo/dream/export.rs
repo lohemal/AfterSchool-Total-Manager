@@ -36,6 +36,8 @@ pub struct ExportPlan {
     pub totals: Totals,
     pub students: usize,
     pub source_sha256: String,
+    /// 이 결과가 다룬 방과후드림 적용 학년(P6)
+    pub applied_grades: Vec<i64>,
 }
 
 fn invalid_date() -> AppError {
@@ -121,6 +123,7 @@ pub fn prepare(conn: &Connection, job_id: i64, bytes: &[u8], transfer_date: &str
         totals,
         students: a.students.len(),
         source_sha256: head.source_sha256,
+        applied_grades: a.applied_grades.clone(),
     })
 }
 
@@ -269,7 +272,7 @@ pub fn record(conn: &Connection, job_id: i64, w: &Written, ep: &ExportPlan) -> A
         job_id,
         "RESULT_EXPORTED",
         &format!(
-            "date={} sha={} rows={} n={} o={} p={} q={} file={}",
+            "date={} sha={} rows={} n={} o={} p={} q={} grades={} file={}",
             ep.plan.transfer_date,
             w.sha256,
             ep.plan.rows.len(),
@@ -277,6 +280,7 @@ pub fn record(conn: &Connection, job_id: i64, w: &Written, ep: &ExportPlan) -> A
             ep.totals.o,
             ep.totals.p,
             ep.totals.q,
+            ep.applied_grades.iter().map(|g| g.to_string()).collect::<Vec<_>>().join(","),
             w.file_name
         ),
     )

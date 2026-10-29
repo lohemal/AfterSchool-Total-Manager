@@ -232,3 +232,114 @@ fn 기존_자료판_트리거에_방과후드림_표가_이어지지_않았다()
     })
     .unwrap();
 }
+
+// ─────────────────────────────────────────────── 011 (P6) — v0.1.11 DB(10)에서
+
+/// v0.1.11 과 같은 10 단계 DB — 정산 + 방과후드림 자료(강좌 연결 · 부서별 항목 차례 ·
+/// 결제 기준월 · 결과 파일까지 만든 작업)를 둔다. (작업공간, 부서)
+fn v10_with_dream(path: &std::path::Path) -> (i64, i64) {
+    let ws = v8_with_settlement(path);
+    let c = Connection::open(path).unwrap();
+    c.pragma_update(None, "foreign_keys", "ON").unwrap();
+    for sql in [
+        include_str!("../../migrations/009_dream_payment.sql"),
+        include_str!("../../migrations/010_dream_workspace_setting.sql"),
+    ] {
+        c.execute_batch(sql).unwrap();
+    }
+    c.pragma_update(None, "user_version", 10).unwrap();
+    let dept: i64 = c.query_row("SELECT id FROM department WHERE workspace_id = ?1", [ws], |r| r.get(0)).unwrap();
+    c.execute_batch(&format!(
+        "INSERT INTO dream_course_map (workspace_id, department_id, course_code) VALUES ({ws}, {dept}, 'PGM0001');
+         INSERT INTO dream_item_priority (department_id, item_code, sort_order) VALUES
+           ({dept}, 'MATERIAL', 1), ({dept}, 'INSTRUCTOR', 2), ({dept}, 'OPERATION', 3), ({dept}, 'TEXTBOOK', 4);
+         INSERT INTO dream_workspace_setting (workspace_id, billing_month) VALUES ({ws}, '202610');
+         INSERT INTO dream_job (id, workspace_id, status, source_name, source_sha256, source_size, app_version)
+           VALUES (1, {ws}, 'READY', '결제.xlsx', '{}', 100, '0.1.11');
+         INSERT INTO dream_job_event (job_id, kind, detail) VALUES (1, 'RESULT_EXPORTED', 'date=20261030 sha={} rows=4 file=결과.xlsx');",
+        "a".repeat(64),
+        "b".repeat(64)
+    ))
+    .unwrap();
+    (ws, dept)
+}
+
+fn dream_counts(c: &Connection) -> Vec<(String, i64)> {
+    [
+        "dream_course_map",
+        "dream_item_priority",
+        "dream_workspace_setting",
+        "dream_job",
+        "dream_job_event",
+        "dream_applied_grade",
+        "dream_item_order",
+    ]
+    .iter()
+    .map(|t| {
+        let n: i64 = c.query_row(&format!("SELECT COUNT(*) FROM {t}"), [], |r| r.get(0)).unwrap_or(-1);
+        (t.to_string(), n)
+    })
+    .collect()
+}
+
+#[test]
+fn 열면_011_이_적용되고_기존_방과후드림_자료와_정산은_그대로다() {
+    let dir = tmp_dir("v10");
+    let path = dir.join("old.db");
+    let (ws, dept) = v10_with_dream(&path);
+    let (before, dream_before) = {
+        let c = Connection::open(&path).unwrap();
+        assert_eq!(migrate::current_version(&c).unwrap(), 10);
+        (fingerprint(&c, ws), dream_counts(&c))
+    };
+    assert_eq!(dream_before.iter().find(|x| x.0 == "dream_applied_grade").unwrap().1, -1, "011 전에는 표가 없다");
+
+    let db = Db::open(&path).unwrap();
+    db.read(|c| {
+        assert_eq!(migrate::current_version(c)?, 11);
+        assert_eq!(migrate::latest_version(), 11);
+        assert_eq!(fingerprint(c, ws), before, "기존 표 · 자료판 · 정산 상태가 바뀌었다");
+        assert_eq!(repo::settle::status(c, ws)?.state, "FRESH");
+        let after = dream_counts(c);
+        for (t, n) in &dream_before {
+            let m = after.iter().find(|x| &x.0 == t).unwrap().1;
+            if *n >= 0 {
+                assert_eq!(m, *n, "{t} 자료가 바뀌었다");
+            }
+        }
+        // 새 표는 비어 있다 — 적용 학년은 미설정, 공통 항목 차례도 옮겨 담지 않는다
+        assert_eq!(after.iter().find(|x| x.0 == "dream_applied_grade").unwrap().1, 0);
+        assert_eq!(after.iter().find(|x| x.0 == "dream_item_order").unwrap().1, 0);
+        assert!(crate::repo::dream::workspace_setting::applied_grades(c, ws)?.is_empty());
+        // 예전 부서별 차례가 하나뿐이니 그 차례를 그대로 쓴다(저장은 하지 않는다)
+        let o = crate::repo::dream::priority::common_item_order(c, ws)?;
+        assert_eq!((o.source, o.order[0].as_str()), ("LEGACY", "MATERIAL"));
+        assert_eq!(crate::repo::dream::course::find(c, ws, "PGM0001")?, Some(dept));
+        let ev: String = c.query_row("SELECT detail FROM dream_job_event WHERE kind = 'RESULT_EXPORTED'", [], |r| r.get(0))?;
+        assert!(ev.starts_with("date=20261030"));
+        let fk: i64 = c.query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |r| r.get(0))?;
+        assert_eq!(fk, 0);
+        let ok: String = c.query_row("PRAGMA integrity_check", [], |r| r.get(0))?;
+        assert_eq!(ok, "ok");
+        // 작업공간을 지우면 적용 학년도 함께 사라진다
+        crate::repo::dream::workspace_setting::set_applied_grades(c, ws, &[3])?;
+        Ok(())
+    })
+    .unwrap();
+    db.write(|c| {
+        c.execute("DELETE FROM workspace WHERE id = ?1", [ws])?;
+        let n: i64 = c.query_row("SELECT COUNT(*) FROM dream_applied_grade", [], |r| r.get(0))?;
+        assert_eq!(n, 0);
+        Ok(())
+    })
+    .unwrap();
+    drop(db);
+    let backups: Vec<String> = std::fs::read_dir(dir.join("backups"))
+        .unwrap()
+        .flatten()
+        .map(|e| e.file_name().to_string_lossy().to_string())
+        .filter(|n| n.ends_with(".db"))
+        .collect();
+    assert_eq!(backups.len(), 1, "{backups:?}");
+    assert!(backups[0].starts_with("before-migrate-v10-"), "{backups:?}");
+}

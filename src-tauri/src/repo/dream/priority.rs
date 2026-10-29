@@ -8,7 +8,7 @@
 //!
 //! ```text
 //! 부서  (방과후드림 순위 → 기존 정산 순위 → 부서명 → 반 이름 → 부서 id)
-//! 항목  (그 부서의 방과후드림 순위 → 기존 정산 항목 순위 → 비용항목 차례 → 코드)
+//! 항목  (P6 부터는 아래 `common_item_order` — 모든 부서에 같은 공통 차례 한 벌)
 //! ```
 //!
 //! 설정하지 않은 것은 설정한 것 뒤에 온다. 같은 자료면 언제나 같은 차례가 나온다.
@@ -162,4 +162,111 @@ pub fn item_order(conn: &Connection, department_id: i64) -> AppResult<Vec<String
         key(a).cmp(&key(b)).then_with(|| a.0.cmp(&b.0))
     });
     Ok(items.into_iter().map(|i| i.0).collect())
+}
+
+// ─────────────────────────────────────────────── 공통 항목 차례 (P6, 011)
+//
+// 항목 차례는 **모든 부서에 같다**. 프로그램 전체에 한 벌(`dream_item_order`).
+// 저장한 것이 없을 때 쓰는 차례(결정적):
+//
+// ```text
+// LEGACY      v0.1.11 의 부서별 차례(dream_item_priority)가 이 작업공간 부서들에서 모두 같으면 그 차례
+// CONFLICT    부서마다 다르면 — 어느 것을 고를지 짐작하지 않는다. 사람이 공통 차례를 저장해야 배분한다
+// SETTLEMENT  부서별 차례가 없으면 기존 정산 항목 순위(읽기만)
+// DEFAULT     그것도 없으면 비용항목 차례
+// ```
+
+/// 지금 쓸 공통 항목 차례와 그 출처(`DREAM` | `LEGACY` | `CONFLICT` | `SETTLEMENT` | `DEFAULT`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ItemOrder {
+    pub order: Vec<String>,
+    pub source: &'static str,
+}
+
+/// 모든 비용항목이 한 번씩 들어 있게 — 빠진 것은 `fill` 차례대로 뒤에 붙인다.
+fn complete(mut order: Vec<String>, fill: &[String]) -> Vec<String> {
+    for c in fill {
+        if !order.contains(c) {
+            order.push(c.clone());
+        }
+    }
+    order
+}
+
+pub fn common_item_order(conn: &Connection, workspace_id: i64) -> AppResult<ItemOrder> {
+    let settle = repo::priority::item_order(conn, workspace_id)?; // 기존 정산 순위(없으면 비용항목 차례)
+    let saved: Vec<String> = conn
+        .prepare("SELECT item_code FROM dream_item_order ORDER BY sort_order")?
+        .query_map([], |r| r.get(0))?
+        .collect::<rusqlite::Result<_>>()?;
+    if !saved.is_empty() {
+        return Ok(ItemOrder {
+            order: complete(saved, &settle),
+            source: "DREAM",
+        });
+    }
+    // v0.1.11 의 부서별 차례 — 이 작업공간 부서들의 것만, 지우지 않고 읽기만
+    let mut st = conn.prepare(
+        "SELECT p.department_id, p.item_code FROM dream_item_priority p
+           JOIN department d ON d.id = p.department_id
+          WHERE d.workspace_id = ?1 ORDER BY p.department_id, p.sort_order",
+    )?;
+    let mut legacy: std::collections::BTreeMap<i64, Vec<String>> = std::collections::BTreeMap::new();
+    for row in st.query_map(params![workspace_id], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))? {
+        let (d, c) = row?;
+        legacy.entry(d).or_default().push(c);
+    }
+    let lists: HashSet<Vec<String>> = legacy.into_values().map(|v| complete(v, &settle)).collect();
+    match lists.len() {
+        0 => {
+            let has_settle: i64 = conn.query_row(
+                "SELECT COUNT(*) FROM item_priority WHERE workspace_id = ?1",
+                params![workspace_id],
+                |r| r.get(0),
+            )?;
+            Ok(ItemOrder {
+                order: settle,
+                source: if has_settle > 0 { "SETTLEMENT" } else { "DEFAULT" },
+            })
+        }
+        1 => Ok(ItemOrder {
+            order: lists.into_iter().next().expect("하나"),
+            source: "LEGACY",
+        }),
+        _ => Ok(ItemOrder {
+            order: settle,
+            source: "CONFLICT",
+        }),
+    }
+}
+
+/// 공통 항목 차례 저장(모든 부서 · 모든 작업공간). 빠진 항목은 지금 차례대로 뒤에 붙인다.
+/// 돌려주는 값은 저장된 차례가 실제로 바뀌었는가.
+pub fn save_common_item_order(conn: &Connection, order: &[String]) -> AppResult<bool> {
+    let known: Vec<String> = repo::cost_items(conn)?.into_iter().map(|i| i.code).collect();
+    let mut seen = HashSet::new();
+    for code in order {
+        if !known.contains(code) {
+            return Err(AppError::invalid("알 수 없는 비용항목이 들어 있습니다."));
+        }
+        if !seen.insert(code.as_str()) {
+            return Err(AppError::invalid("같은 항목이 두 번 들어 있습니다."));
+        }
+    }
+    let full = complete(order.to_vec(), &known);
+    let before: Vec<String> = conn
+        .prepare("SELECT item_code FROM dream_item_order ORDER BY sort_order")?
+        .query_map([], |r| r.get(0))?
+        .collect::<rusqlite::Result<_>>()?;
+    if before == full {
+        return Ok(false);
+    }
+    conn.execute("DELETE FROM dream_item_order", [])?;
+    for (i, code) in full.iter().enumerate() {
+        conn.execute(
+            "INSERT INTO dream_item_order (item_code, sort_order) VALUES (?1, ?2)",
+            params![code, i as i64 + 1],
+        )?;
+    }
+    Ok(true)
 }

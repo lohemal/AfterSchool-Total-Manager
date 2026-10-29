@@ -24,7 +24,7 @@ import type {
   DreamSession,
   DreamStudentMatch,
 } from '@/ipc/types'
-import { matchStateLabel, reasonText } from '@/lib/dream'
+import { coursePicksToSave, defaultCoursePick, gradesLabel, matchStateLabel, reasonText } from '@/lib/dream'
 
 import { DreamAllocPanel } from './DreamAllocPanel'
 
@@ -42,15 +42,19 @@ export function DreamMatchPanel({
   workspaceId,
   path,
   check,
+  grades,
 }: {
   workspaceId: number
   path: string
   check: DreamFileCheck
+  /** 방과후드림 적용 학년(비어 있으면 미설정) */
+  grades: number[]
 }) {
   const toast = useToast()
   const [session, setSession] = useState<DreamSession | null>(null)
-  // 다른 파일 · 다른 검사 결과면 진행 중이던 작업은 버린다
-  useEffect(() => setSession(null), [path, check.sha256, workspaceId])
+  // 다른 파일 · 다른 검사 결과 · 다른 적용 학년이면 진행 중이던 작업은 버린다(서버도 그 작업을 닫는다)
+  const gradesKey = [...grades].sort((a, b) => a - b).join(',')
+  useEffect(() => setSession(null), [path, check.sha256, workspaceId, gradesKey])
 
   const failed = (e: unknown) => {
     const code = (e as { code?: string }).code ?? ''
@@ -68,10 +72,13 @@ export function DreamMatchPanel({
   if (!session) {
     return (
       <Card title="매칭 및 검증">
+        {grades.length === 0 && (
+          <Notice tone="warn">방과후드림 적용 학년을 1개 이상 선택해 주세요. 위 기본정보에서 고르고 저장하면 시작할 수 있습니다.</Notice>
+        )}
         <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
           <Button
             variant="primary"
-            disabled={run.isPending}
+            disabled={run.isPending || grades.length === 0}
             onClick={() => run.mutate(() => api.dreamStart(workspaceId, path, check.sha256))}
           >
             {run.isPending ? '검증하는 중…' : '매칭 및 검증 시작'}
@@ -110,8 +117,12 @@ export function DreamMatchPanel({
             <div className="stat__sub">모든 학생이 준비 완료여야 합니다</div>
           </div>
         </div>
+        <div style={{ margin: '4px 0' }}>
+          적용 학년 <b>{gradesLabel(m.appliedGrades)}</b> · 검증 대상 학생 <b>{won(m.universeStudents)}명</b>
+          <span className="hint"> (적용 학년에서 최신 정산 금액이 남은 학생, 취소 포함)</span>
+        </div>
         <div className="hint" style={{ margin: '4px 0' }}>
-          파일 전체 정산금액 {won(m.fileTotal)}원 · 최신 정산 전체 {won(m.settlementTotal)}원{' '}
+          파일 전체 정산금액 {won(m.fileTotal)}원 · 적용 학년 정산 합계 {won(m.settlementTotal)}원{' '}
           {m.settlementId !== null &&
             (m.fileTotal === m.settlementTotal ? (
               <span className="tag tag--free">일치</span>
@@ -154,7 +165,7 @@ export function DreamMatchPanel({
         courses={m.courses}
         departments={m.departments}
         busy={run.isPending}
-        onConfirm={(code, dept) => run.mutate(() => api.dreamConfirmCourse(jobId, path, code, dept))}
+        onConfirm={(picks) => run.mutate(() => api.dreamConfirmCourses(jobId, path, picks))}
       />
       <IdentityCard
         students={m.students}
@@ -201,80 +212,113 @@ function CourseCard({
   courses: DreamCourseMatch[]
   departments: { id: number; label: string }[]
   busy: boolean
-  onConfirm: (code: string, dept: number) => void
+  onConfirm: (picks: [string, number][]) => void
 }) {
-  const [pick, setPick] = useState<Record<string, number>>({})
+  // 화면에서 고친 선택만 — 고치지 않은 행은 기본값(지금 연결 또는 확실한 추천 하나)
+  const [picked, setPicked] = useState<Record<string, number | null>>({})
+  const [asking, setAsking] = useState(false)
+  useEffect(() => setPicked({}), [courses])
+  const choice = (c: DreamCourseMatch) => (c.courseCode in picked ? picked[c.courseCode] : defaultCoursePick(c))
+  const toSave = coursePicksToSave(courses, picked)
+  const changing = toSave.filter(([code]) => courses.find((c) => c.courseCode === code)?.departmentId !== null).length
+  const unmapped = courses.filter((c) => c.departmentId === null).length
+  const save = () => {
+    onConfirm(toSave)
+    setAsking(false)
+  }
   return (
-    <Card title="강좌코드 연결" flush>
+    <Card
+      title="강좌코드 연결"
+      flush
+      actions={
+        <Button
+          small
+          variant="primary"
+          disabled={busy || toSave.length === 0}
+          onClick={() => (changing > 0 ? setAsking(true) : save())}
+        >
+          일괄 연결 ({toSave.length}건)
+        </Button>
+      }
+    >
       <div className="hint" style={{ padding: '8px 12px' }}>
-        강좌명코드 하나를 이 작업공간 부서 하나에 잇습니다. 한 번 확정하면 이 파일의 모든 학생에게
-        적용됩니다. 추천은 참고일 뿐이며, [연결 확정]을 눌러야 저장됩니다.
+        결제파일의 강좌코드를 학교의 방과후 부서와 연결합니다. 추천된 연결을 확인한 뒤 한 번에 저장할 수
+        있습니다. 이름이 정확히 같거나 직전 작업공간에서 쓰던 연결이 하나뿐일 때만 미리 골라 두며, [일괄
+        연결]을 눌러야 저장됩니다. 하나라도 저장할 수 없으면 아무것도 저장하지 않습니다.
+      </div>
+      <div style={{ padding: '0 12px 8px' }}>
+        {unmapped > 0 ? (
+          <span className="tag tag--warn">미연결 강좌 {unmapped}개</span>
+        ) : (
+          <span className="tag tag--free">모든 강좌 연결됨</span>
+        )}
       </div>
       <div className="tableWrap">
         <table className="table">
           <thead>
             <tr>
-              <th>강좌명코드</th>
               <th className="left">파일 강좌명</th>
+              <th>강좌코드</th>
               <th>줄</th>
-              <th className="left">현재 연결</th>
-              <th className="left">추천 · 선택</th>
+              <th className="left">연결할 부서</th>
               <th>상태</th>
             </tr>
           </thead>
           <tbody>
             {courses.map((c) => {
-              const chosen = pick[c.courseCode] ?? c.suggestions.find((s) => !s.taken)?.departmentId
+              const d = choice(c)
+              const dirty = d !== null && d !== c.departmentId
+              const sugg = new Map(c.suggestions.map((x) => [x.departmentId, x]))
               return (
                 <tr key={c.courseCode}>
-                  <td>{c.courseCode}</td>
                   <td className="left">{c.courseNames.join(', ')}</td>
+                  <td>{c.courseCode}</td>
                   <td>{c.rows}</td>
-                  <td className="left">{c.deptLabel ?? '—'}</td>
                   <td className="left">
-                    {c.departmentId === null ? (
-                      <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                        <Select
-                          value={chosen ?? ''}
-                          onChange={(e) => setPick({ ...pick, [c.courseCode]: Number(e.target.value) })}
-                          style={{ minWidth: 200 }}
-                        >
-                          <option value="">부서 선택</option>
-                          {c.suggestions.map((s) => (
-                            <option key={`s${s.departmentId}`} value={s.departmentId} disabled={s.taken}>
-                              ★ {s.label} ({s.why.map((w) => WHY[w]).join(' · ')}){s.taken ? ' — 다른 코드에 연결됨' : ''}
-                            </option>
-                          ))}
-                          {departments
-                            .filter((d) => !c.suggestions.some((s) => s.departmentId === d.id))
-                            .map((d) => (
-                              <option key={d.id} value={d.id}>
-                                {d.label}
-                              </option>
-                            ))}
-                        </Select>
-                        <Button small disabled={busy || !chosen} onClick={() => chosen && onConfirm(c.courseCode, chosen)}>
-                          연결 확정
-                        </Button>
-                      </div>
-                    ) : (
-                      '—'
-                    )}
+                    <Select
+                      value={d ?? ''}
+                      onChange={(e) =>
+                        setPicked({ ...picked, [c.courseCode]: e.target.value ? Number(e.target.value) : null })
+                      }
+                      style={{ minWidth: 240 }}
+                    >
+                      <option value="">부서 선택</option>
+                      {c.suggestions.map((x) => (
+                        <option key={`s${x.departmentId}`} value={x.departmentId} disabled={x.taken}>
+                          ★ {x.label} ({x.why.map((w) => WHY[w]).join(' · ')}){x.taken ? ' — 다른 코드에 연결됨' : ''}
+                        </option>
+                      ))}
+                      {departments
+                        .filter((x) => !sugg.has(x.id))
+                        .map((x) => (
+                          <option key={x.id} value={x.id}>
+                            {x.label}
+                          </option>
+                        ))}
+                    </Select>
                     {c.previous && c.departmentId === null && (
                       <div className="hint">
                         직전 작업공간({c.previous[0]})에서는 “{c.previous[1]}”에 연결됨
                       </div>
                     )}
                     {c.reasons
-                      .filter((r) => r.state === 'ERROR')
+                      .filter((r) => r.code !== 'COURSE_MAP_MISSING')
                       .map((r, i) => (
-                        <div key={i} style={{ color: 'var(--red-600)' }}>
+                        <div key={i} style={{ color: r.state === 'ERROR' ? 'var(--red-600)' : undefined }} className={r.state === 'ERROR' ? undefined : 'hint'}>
                           {reasonText(r)}
                         </div>
                       ))}
                   </td>
                   <td>
-                    <StateTag s={c.state} />
+                    {c.departmentId !== null && !dirty ? (
+                      <span className="tag tag--free">연결됨</span>
+                    ) : c.departmentId !== null && dirty ? (
+                      <span className="tag tag--warn">바꿀 예정</span>
+                    ) : d !== null ? (
+                      <span className="tag tag--warn">연결 예정</span>
+                    ) : (
+                      <span className="tag tag--bad">미연결</span>
+                    )}
                   </td>
                 </tr>
               )
@@ -282,6 +326,21 @@ function CourseCard({
           </tbody>
         </table>
       </div>
+      {asking && (
+        <Confirm
+          title="강좌코드 일괄 연결"
+          confirmText={`${toSave.length}건 연결`}
+          busy={busy}
+          onClose={() => setAsking(false)}
+          onConfirm={save}
+          message={
+            <>
+              새로 잇는 것 <b>{toSave.length - changing}건</b>, 이미 연결된 것을 바꾸는 것 <b>{changing}건</b>을 한 번에
+              저장합니다. 연결을 바꾸면 매칭을 다시 검증하고, 이미 계산한 배분 결과는 다시 계산해야 합니다.
+            </>
+          }
+        />
+      )}
     </Card>
   )
 }

@@ -30,6 +30,7 @@ import type {
 } from '@/ipc/types'
 import {
   allocIssueText,
+  gradesLabel,
   demoteExport,
   exportView,
   move,
@@ -174,7 +175,7 @@ export function DreamAllocPanel({
           <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
             <span className="tag tag--free">배분 검증 완료</span>
             <span className="hint">
-              학생 {result.students.length}명 · 줄마다 정산금액 = 개인부담 + 이용권 + 자유수강권, 학생마다 ·
+              적용 학년 <b>{gradesLabel(result.appliedGrades)}</b> · 학생 {result.students.length}명 · 줄마다 정산금액 = 개인부담 + 이용권 + 자유수강권, 학생마다 ·
               파일 전체 합계가 최신 정산과 같습니다.
             </span>
           </div>
@@ -269,7 +270,7 @@ function ExportDone({ r }: { r: DreamExport }) {
           </Button>
         }
       >
-        <b>{r.written.fileName}</b> 저장 완료 — 결제행 {won(r.rows)}줄 · 학생 {won(r.students)}명 · 이체예정일{' '}
+        <b>{r.written.fileName}</b> 저장 완료 — 적용 학년 {gradesLabel(r.appliedGrades)} · 결제행 {won(r.rows)}줄 · 학생 {won(r.students)}명 · 이체예정일{' '}
         {r.transferDate}
         {!r.historySaved && <div>{r.historyError}</div>}
       </Notice>
@@ -313,11 +314,9 @@ function PriorityCard({ workspaceId, onChanged }: { workspaceId: number; onChang
     return used.length > 0 ? used : all
   }, [view])
   const [order, setOrder] = useState<number[]>([])
-  const [pick, setPick] = useState<number | null>(null)
   const [items, setItems] = useState<string[]>([])
   useEffect(() => setOrder(shown.map((d) => d.departmentId)), [shown])
-  const dept = shown.find((d) => d.departmentId === pick) ?? shown[0]
-  useEffect(() => setItems(dept ? dept.items.map((i) => i.code) : []), [dept])
+  useEffect(() => setItems(view ? view.items.map((i) => i.code) : []), [view])
 
   const saved = (v: DreamPriorityView) => {
     const changed = v.digest !== view?.digest
@@ -331,16 +330,16 @@ function PriorityCard({ workspaceId, onChanged }: { workspaceId: number; onChang
     onError: (e) => toast.bad(errorMessage(e)),
   })
   const saveItems = useMutation({
-    mutationFn: () => api.dreamSaveItemPriority(workspaceId, dept!.departmentId, items),
+    mutationFn: () => api.dreamSaveItemOrder(workspaceId, items),
     onSuccess: saved,
     onError: (e) => toast.bad(errorMessage(e)),
   })
 
   if (!view) return null
   const label = (id: number) => shown.find((d) => d.departmentId === id)?.label ?? String(id)
-  const name = (code: string) => dept?.items.find((i) => i.code === code)?.name ?? code
+  const name = (code: string) => view.items.find((i) => i.code === code)?.name ?? code
   const deptDirty = order.join(',') !== shown.map((d) => d.departmentId).join(',')
-  const itemDirty = dept ? items.join(',') !== dept.items.map((i) => i.code).join(',') : false
+  const itemDirty = items.join(',') !== view.items.map((i) => i.code).join(',')
 
   return (
     <Card title="배분 우선순위">
@@ -383,55 +382,48 @@ function PriorityCard({ workspaceId, onChanged }: { workspaceId: number; onChang
           </div>
         </div>
 
-        {dept && (
-          <div style={{ minWidth: 280 }}>
-            <div style={{ marginBottom: 6, display: 'flex', gap: 8, alignItems: 'center' }}>
-              <b>항목 차례</b>
-              <Select
-                value={dept.departmentId}
-                onChange={(e) => setPick(Number(e.target.value))}
-                style={{ minWidth: 180 }}
-              >
-                {shown.map((d) => (
-                  <option key={d.departmentId} value={d.departmentId}>
-                    {d.label}
-                  </option>
-                ))}
-              </Select>
-            </div>
-            <div className="hint" style={{ marginBottom: 4 }}>
-              {prioritySourceLabel(dept.itemSource)} · 부서마다 따로입니다
-            </div>
-            <ol style={{ margin: 0, paddingLeft: 20 }}>
-              {items.map((c, i) => (
-                <li key={c} style={{ marginBottom: 4 }}>
-                  <span style={{ display: 'inline-block', minWidth: 90 }}>{name(c)}</span>
-                  <Button small disabled={i === 0} onClick={() => setItems(move(items, i, -1))} aria-label="위로">
-                    ↑
-                  </Button>{' '}
-                  <Button
-                    small
-                    disabled={i === items.length - 1}
-                    onClick={() => setItems(move(items, i, 1))}
-                    aria-label="아래로"
-                  >
-                    ↓
-                  </Button>
-                </li>
-              ))}
-            </ol>
-            <div style={{ marginTop: 8 }}>
-              <Button
-                small
-                variant="primary"
-                disabled={saveItems.isPending || (!itemDirty && dept.itemSource === 'DREAM')}
-                onClick={() => saveItems.mutate()}
-              >
-                이 부서 항목 차례 저장
-              </Button>
-            </div>
+        <div style={{ minWidth: 280 }}>
+          <div style={{ marginBottom: 6 }}>
+            <b>항목 차례</b> <span className="hint">— {prioritySourceLabel(view.itemSource)}</span>
           </div>
-        )}
+          <div className="hint" style={{ marginBottom: 4 }}>
+            항목 차례는 모든 부서에 동일하게 적용됩니다.
+          </div>
+          {view.itemSource === 'CONFLICT' && (
+            <Notice tone="warn">
+              예전 버전에서 부서마다 다르게 저장한 항목 차례가 있어 하나로 고르지 않았습니다. 모든 부서에 쓸
+              차례를 확인하고 [항목 차례 저장]을 눌러야 배분할 수 있습니다.
+            </Notice>
+          )}
+          <ol style={{ margin: 0, paddingLeft: 20 }}>
+            {items.map((c, i) => (
+              <li key={c} style={{ marginBottom: 4 }}>
+                <span style={{ display: 'inline-block', minWidth: 90 }}>{name(c)}</span>
+                <Button small disabled={i === 0} onClick={() => setItems(move(items, i, -1))} aria-label="위로">
+                  ↑
+                </Button>{' '}
+                <Button
+                  small
+                  disabled={i === items.length - 1}
+                  onClick={() => setItems(move(items, i, 1))}
+                  aria-label="아래로"
+                >
+                  ↓
+                </Button>
+              </li>
+            ))}
+          </ol>
+          <div style={{ marginTop: 8 }}>
+            <Button
+              small
+              variant="primary"
+              disabled={saveItems.isPending || (!itemDirty && view.itemSource === 'DREAM')}
+              onClick={() => saveItems.mutate()}
+            >
+              항목 차례 저장
+            </Button>
+          </div>
+        </div>
       </div>
     </Card>
   )

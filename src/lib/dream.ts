@@ -10,6 +10,7 @@
 
 import type {
   DreamAllocation,
+  DreamCourseMatch,
   DreamAllocIssue,
   DreamExport,
   DreamIssue,
@@ -145,8 +146,8 @@ const REASON: Record<string, (r: DreamReason) => string> = {
   SETTLEMENT_NOT_FRESH: (r) => `정산이 최신이 아닙니다. ${r.detail ?? ''}`,
   BUDGET_CROSSCHECK_FAILED: () => '정산 결과와 지원금 기록이 맞지 않습니다. 정산을 다시 만들어 주세요.',
   SETTLEMENT_STUDENT_NOT_IN_FILE: (r) =>
-    `최신 정산에 금액이 남아 있지만 결제파일에 없는 학생이 있습니다(${r.detail ?? ''}). 취소한 학생도 남은 금액이 있으면 파일에 있어야 합니다.`,
-  FILE_TOTAL_MISMATCH: (r) => `파일 전체 정산금액 합계가 최신 정산 전체와 다릅니다(${r.detail ?? ''}).`,
+    `적용 학년에서 최신 정산에 금액이 남아 있지만 결제파일에 없는 학생이 있습니다(${r.detail ?? ''}). 취소한 학생도 남은 금액이 있으면 파일에 있어야 합니다.`,
+  FILE_TOTAL_MISMATCH: (r) => `파일 전체 정산금액 합계가 적용 학년 정산 합계와 다릅니다(${r.detail ?? ''}).`,
   SETTLEMENT_CHARGE_TOTAL_MISMATCH: (r) =>
     `정산 전체 금액이 Charge 합계와 다릅니다(${r.detail ?? ''}). 정산을 다시 만들어 주세요.`,
   STUDENT_INFO_INCONSISTENT: () => '같은 개인참조번호의 줄들끼리 학년 · 반 · 번호 · 이름 · 생년월일이 서로 다릅니다.',
@@ -163,6 +164,11 @@ const REASON: Record<string, (r: DreamReason) => string> = {
   STUDENT_BIRTH_NOT_REGISTERED: () => '생년월일이 아직 등록되지 않았습니다. 확인 후 등록해 주세요.',
   STUDENT_NOT_CONFIRMED: () => '학생이 정해지지 않아 금액을 맞대어 보지 못했습니다.',
   COURSE_MAP_MISSING: () => '강좌명코드가 아직 부서에 연결되지 않았습니다.',
+  APPLIED_GRADES_NOT_SET: () => '방과후드림 적용 학년을 1개 이상 선택해 주세요.',
+  FILE_STUDENT_OUTSIDE_APPLIED_GRADES: (r) =>
+    r.row === null && (r.detail ?? '').includes('명')
+      ? `선택한 적용 학년에 포함되지 않는 학생이 결제파일에 있습니다(${r.detail ?? ''}). 적용 학년 또는 결제파일을 확인해 주세요.`
+      : `이 학생(${r.detail ?? ''})은 선택한 적용 학년이 아닙니다. 적용 학년 또는 결제파일을 확인해 주세요.`,
   COURSE_NAME_DIFFERS: (r) => `강좌명 표기가 연결된 부서 이름과 다릅니다(${r.detail ?? ''}). 참고만 — 확정한 강좌코드 연결을 따릅니다.`,
   COURSE_NAME_INCONSISTENT: (r) => `같은 강좌명코드에 강좌명이 여럿입니다(${r.detail ?? ''}).`,
   ENROLLMENT_NOT_FOUND: () => '이 학생은 이 부서를 수강하지 않습니다.',
@@ -200,6 +206,8 @@ const ALLOC: Record<string, (i: DreamAllocIssue) => string> = {
   ALLOC_FREE_SUM_MISMATCH: () => '자유수강권 합계가 정산 자유수강권과 다릅니다.',
   ALLOC_PERSONAL_SUM_MISMATCH: () => '개인부담 합계가 정산 개인부담과 다릅니다.',
   ALLOC_FILE_SUM_MISMATCH: (i) => `파일 전체 배분 합계가 정산 전체와 다릅니다(${i.detail ?? ''}).`,
+  ITEM_ORDER_NOT_CONFIRMED: () =>
+    '예전 버전에서 부서마다 다르게 저장한 항목 차례가 있습니다. 모든 부서에 쓸 항목 차례를 확인하고 [항목 차례 저장]을 눌러 주세요.',
 }
 
 export function allocIssueText(i: DreamAllocIssue): string {
@@ -208,7 +216,53 @@ export function allocIssueText(i: DreamAllocIssue): string {
 }
 
 export function prioritySourceLabel(s: DreamPrioritySource): string {
-  return s === 'DREAM' ? '방과후드림 순위' : s === 'SETTLEMENT' ? '기존 정산 순위(기본값)' : '정해진 차례(기본값)'
+  switch (s) {
+    case 'DREAM':
+      return '방과후드림 순위'
+    case 'LEGACY':
+      return '예전에 저장한 차례(기본값)'
+    case 'CONFLICT':
+      return '확인 필요 — 예전 차례가 부서마다 다릅니다'
+    case 'SETTLEMENT':
+      return '기존 정산 순위(기본값)'
+    default:
+      return '정해진 차례(기본값)'
+  }
+}
+
+/** `[3, 4]` → `3학년 · 4학년`, 빈 목록은 `미설정` */
+export function gradesLabel(grades: number[]): string {
+  return grades.length === 0 ? '미설정' : [...grades].sort((a, b) => a - b).map((g) => `${g}학년`).join(' · ')
+}
+
+/** 학년 집합이 같은가(차례 무관) */
+export function sameGrades(a: number[], b: number[]): boolean {
+  const x = [...new Set(a)].sort((p, q) => p - q)
+  const y = [...new Set(b)].sort((p, q) => p - q)
+  return x.length === y.length && x.every((v, i) => v === y[i])
+}
+
+/**
+ * 강좌코드 연결 표의 기본 선택 — 이미 연결된 부서, 아니면 '이름 같음'이나 '직전 작업공간 연결'
+ * 근거가 있는 추천이 **정확히 하나**일 때만 그 부서. 그 밖에는 고르지 않은 채로 둔다(사람이 고른다).
+ * 화면 기본값일 뿐 저장하지 않는다.
+ */
+export function defaultCoursePick(c: DreamCourseMatch): number | null {
+  if (c.departmentId !== null) return c.departmentId
+  const sure = c.suggestions.filter(
+    (s) => !s.taken && (s.why.includes('SAME_NAME') || s.why.includes('PREVIOUS_WORKSPACE')),
+  )
+  return sure.length === 1 ? sure[0].departmentId : null
+}
+
+/** 저장할 것 — 고른 부서가 지금 연결과 다른 행만 [강좌명코드, 부서 id] */
+export function coursePicksToSave(courses: DreamCourseMatch[], picked: Record<string, number | null>): [string, number][] {
+  const out: [string, number][] = []
+  for (const c of courses) {
+    const d = c.courseCode in picked ? picked[c.courseCode] : defaultCoursePick(c)
+    if (d !== null && d !== undefined && d !== c.departmentId) out.push([c.courseCode, d])
+  }
+  return out
 }
 
 /** 목록에서 한 칸 위(-1) · 아래(+1)로. 끝이면 그대로. */

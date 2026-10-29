@@ -63,6 +63,12 @@ pub struct DreamSettings {
     pub workspace_name: String,
     pub org_code: Option<String>,
     pub billing_month: Option<String>,
+    /// 방과후드림 적용 학년(비어 있으면 미설정)
+    pub applied_grades: Vec<i64>,
+    /// 고를 수 있는 학년 — 1~6 과, 이 학년도 학생에게 있는 그보다 높은 학년
+    pub grade_choices: Vec<i64>,
+    /// 제안 — 앞선 작업공간의 적용 학년(작업공간 이름, 학년). 저장하지 않는다
+    pub suggested_grades: Option<(String, Vec<i64>)>,
 }
 
 #[tauri::command]
@@ -76,6 +82,42 @@ pub fn dream_settings(db: State<'_, Db>, workspace_id: i64) -> AppResult<DreamSe
             workspace_name: ws.name,
             org_code: setting::org_code(c)?,
             billing_month: workspace_setting::billing_month(c, workspace_id)?,
+            applied_grades: workspace_setting::applied_grades(c, workspace_id)?,
+            grade_choices: {
+                let mut g: Vec<i64> = (1..=6).collect();
+                let more: Vec<i64> = c
+                    .prepare("SELECT DISTINCT grade FROM student WHERE year_id = ?1 AND grade > 6 ORDER BY grade")?
+                    .query_map([ws.year_id], |r| r.get(0))?
+                    .collect::<rusqlite::Result<_>>()?;
+                g.extend(more);
+                g
+            },
+            suggested_grades: workspace_setting::suggested_grades(c, workspace_id)?,
+        })
+    })
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DreamGradesSaved {
+    pub grades: Vec<i64>,
+    /// 실제로 바뀌었는가 — 바뀌었으면 이 작업공간의 진행 중 작업을 닫았다(다시 검증해야 한다)
+    pub changed: bool,
+    pub closed_jobs: usize,
+}
+
+/// 방과후드림 적용 학년 저장. 집합이 실제로 바뀌면 이 작업공간에서 진행 중이던 매칭 · 배분
+/// 작업을 닫는다 — 검증 대상 학생이 바뀌었으므로 예전 결과를 쓰지 않는다. 처리 이력은 지우지
+/// 않는다. 정산 · 자료판과는 무관하다.
+#[tauri::command]
+pub fn dream_set_applied_grades(db: State<'_, Db>, workspace_id: i64, grades: Vec<i64>) -> AppResult<DreamGradesSaved> {
+    db.write(|c| {
+        let (grades, changed) = workspace_setting::set_applied_grades(c, workspace_id, &grades)?;
+        let closed_jobs = if changed { job::close_open(c, workspace_id, "GRADES_CHANGED")? } else { 0 };
+        Ok(DreamGradesSaved {
+            grades,
+            changed,
+            closed_jobs,
         })
     })
 }
@@ -210,6 +252,23 @@ pub fn dream_confirm_births(db: State<'_, Db>, job_id: i64, path: String, keys: 
     .map_err(|e| close_if_stale(&db, job_id, e))
 }
 
+/// 강좌코드 일괄 연결 — 고른 것 모두를 한 번에 저장하고(하나라도 안 되면 아무것도 저장하지
+/// 않는다) 파일 전체를 다시 검증한다.
+#[tauri::command]
+pub fn dream_confirm_courses(
+    db: State<'_, Db>,
+    job_id: i64,
+    path: String,
+    picks: Vec<(String, i64)>,
+) -> AppResult<Session> {
+    let (_, bytes) = read_source(&path)?;
+    db.write(|c| {
+        session::confirm_courses(c, job_id, &bytes, &picks)?;
+        session::revalidate(c, job_id, &bytes)
+    })
+    .map_err(|e| close_if_stale(&db, job_id, e))
+}
+
 #[tauri::command]
 pub fn dream_confirm_course(
     db: State<'_, Db>,
@@ -245,19 +304,11 @@ pub fn dream_save_dept_priority(db: State<'_, Db>, workspace_id: i64, order: Vec
     })
 }
 
+/// 공통 항목 차례 저장(모든 부서 · 모든 작업공간). 바뀌었으면 진행 중 작업의 배분 결과를 비운다.
 #[tauri::command]
-pub fn dream_save_item_priority(
-    db: State<'_, Db>,
-    workspace_id: i64,
-    department_id: i64,
-    order: Vec<String>,
-) -> AppResult<PriorityView> {
+pub fn dream_save_item_order(db: State<'_, Db>, workspace_id: i64, order: Vec<String>) -> AppResult<PriorityView> {
     db.write(|c| {
-        let ws: i64 = c.query_row("SELECT workspace_id FROM department WHERE id = ?1", [department_id], |r| r.get(0))?;
-        if ws != workspace_id {
-            return Err(AppError::invalid("이 작업공간의 부서가 아닙니다."));
-        }
-        allocation::save_item_priority(c, department_id, &order)?;
+        allocation::save_common_item_order(c, &order)?;
         allocation::priority_view(c, workspace_id)
     })
 }
@@ -290,6 +341,8 @@ pub struct DreamExport {
     pub students: usize,
     pub totals: Totals,
     pub transfer_date: String,
+    /// 이 결과가 다룬 방과후드림 적용 학년
+    pub applied_grades: Vec<i64>,
     /// 처리 이력에 남겼는가. 파일은 만들어졌는데 기록만 실패하면 false — 숨기지 않고 알린다
     pub history_saved: bool,
     pub history_error: Option<String>,
@@ -330,6 +383,7 @@ pub fn dream_export(
         students: ep.students,
         totals: ep.totals,
         transfer_date: ep.plan.transfer_date.clone(),
+        applied_grades: ep.applied_grades.clone(),
         written,
         history_saved,
         history_error,

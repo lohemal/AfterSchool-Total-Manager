@@ -37,9 +37,11 @@
 //!
 //! ## 파일 전체 — 정산 전체를 빠짐없이
 //!
-//! 기준은 지금 수강 중인 학생이 아니라 **최신 유효 정산에 금액이 남은 모든 학생**이다
-//! (취소했어도 Charge 가 남아 정산에 들어갔으면 포함). 그런 학생이 파일에 없으면 파일 전체
-//! 오류다. 그리고 `파일 ΣN == 정산 전체 T == 정산에 들어간 양수 Charge 전체 합`.
+//! 기준은 지금 수강 중인 학생이 아니라 **최신 유효 정산에서 방과후드림 적용 학년(P6)에 속하고
+//! 금액이 남은 모든 학생**이다(취소했어도 Charge 가 남아 정산에 들어갔으면 포함). 그런 학생이
+//! 파일에 없으면 파일 전체 오류다. 적용 학년이 아닌 학생이 파일에 있어도 오류다(조용히 빼지
+//! 않는다). 그리고 `파일 ΣN == 적용 학년 정산 T 합 == 그 학년 양수 Charge 합` — 학교 전체
+//! 정산과 견주지 않는다. 적용 학년이 미설정이면 맞대어 보지 않는다.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
@@ -52,7 +54,7 @@ use crate::domain::dream_file::{DreamFile, DreamRow};
 use crate::error::AppResult;
 use crate::repo;
 use crate::repo::dream::amount::{self, FreshSettlement, StudentAmount};
-use crate::repo::dream::{course, identity};
+use crate::repo::dream::{course, identity, workspace_setting};
 use crate::repo::enrollment::{dept_label, student_label};
 
 /// 학생 · 강좌 · 줄의 상태.
@@ -123,6 +125,10 @@ pub mod code {
     pub const FILE_TOTAL_MISMATCH: &str = "FILE_TOTAL_MISMATCH";
     /// 정산 전체 T ≠ 이 작업공간의 양수 Charge 전체 합
     pub const SETTLEMENT_CHARGE_TOTAL_MISMATCH: &str = "SETTLEMENT_CHARGE_TOTAL_MISMATCH";
+    /// 방과후드림 적용 학년이 미설정(P6)
+    pub const APPLIED_GRADES_NOT_SET: &str = "APPLIED_GRADES_NOT_SET";
+    /// 적용 학년이 아닌 학생이 결제파일에 있다(P6) — 학생에게도, 파일 전체에도
+    pub const FILE_STUDENT_OUTSIDE_APPLIED_GRADES: &str = "FILE_STUDENT_OUTSIDE_APPLIED_GRADES";
     // 학생
     pub const STUDENT_INFO_INCONSISTENT: &str = "STUDENT_INFO_INCONSISTENT";
     pub const STUDENT_REF_NOT_REGISTERED: &str = "STUDENT_REF_NOT_REGISTERED";
@@ -267,8 +273,14 @@ pub struct Matching {
     pub absent: Vec<AbsentStudent>,
     /// 파일 ΣN
     pub file_total: i64,
-    /// 최신 정산 전체 T
+    /// 적용 학년 정산 T 합(학교 전체가 아니다)
     pub settlement_total: i64,
+    /// 방과후드림 적용 학년(비어 있으면 미설정)
+    pub applied_grades: Vec<i64>,
+    /// 검증 대상 학생 수 — 적용 학년에서 정산 금액이 남은 학생
+    pub universe_students: usize,
+    /// 적용 학년이 아닌데 파일에 있는 학생 — (학년, 학생 수). 이름 등은 담지 않는다
+    pub outside: Vec<(i64, usize)>,
     /// 모든 학생이 준비 완료이고 파일 · 정산 문제가 없는가 — 배분 단계로 갈 수 있는가
     pub p4_ready: bool,
 }
@@ -821,6 +833,7 @@ fn check_lines(
 /// 있는 모든 학생(`amounts`, T > 0). 취소한 수강이어도 Charge 가 남아 정산됐으면 들어 있다.
 /// 학생마다의 양수 Charge 누락은 `check_lines` 가 본다(`DB_CHARGE_NOT_IN_FILE`).
 fn check_whole(conn: &Connection, ws: i64, amounts: &HashMap<i64, StudentAmount>, out: &mut Matching) -> AppResult<()> {
+    // `amounts` 는 이미 적용 학년으로 거른 대상 집합(`universe`)이다
     // 개인참조번호로 확정됐거나 후보가 하나뿐인 학생. 후보 학생은 확정 전이지만 '없다'고
     // 따로 세면 같은 학생을 두 번 알리게 된다(확정 전이라 어차피 다음 단계로 못 간다)
     let in_file: BTreeSet<i64> = out
@@ -859,11 +872,16 @@ fn check_whole(conn: &Connection, ws: i64, amounts: &HashMap<i64, StudentAmount>
             .push(err(code::SETTLEMENT_STUDENT_NOT_IN_FILE).detail(format!("{}명 · {sum}원", out.absent.len())));
     }
 
-    // 정산 전체 T == 이 작업공간의 양수 Charge 전체 합(정산 대상은 금액으로 정한다)
+    // 적용 학년 정산 T == 그 학년 학생들의 양수 Charge 합(정산 대상은 금액으로 정한다)
     out.settlement_total = amounts.values().map(|a| a.total).sum();
+    let grades = out.applied_grades.iter().map(|g| g.to_string()).collect::<Vec<_>>().join(",");
     let charges: i64 = conn.query_row(
-        "SELECT COALESCE(SUM(c.amount), 0) FROM charge c JOIN enrollment e ON e.id = c.enrollment_id
-          WHERE e.workspace_id = ?1 AND c.amount > 0",
+        &format!(
+            "SELECT COALESCE(SUM(c.amount), 0) FROM charge c
+               JOIN enrollment e ON e.id = c.enrollment_id
+               JOIN student s ON s.id = e.student_id
+              WHERE e.workspace_id = ?1 AND c.amount > 0 AND s.grade IN ({grades})"
+        ),
         params![ws],
         |r| r.get(0),
     )?;
@@ -872,13 +890,32 @@ fn check_whole(conn: &Connection, ws: i64, amounts: &HashMap<i64, StudentAmount>
             err(code::SETTLEMENT_CHARGE_TOTAL_MISMATCH).detail(format!("Charge {charges} · 정산 {}", out.settlement_total)),
         );
     }
-    // 파일 ΣN == 정산 전체 T — 학생마다 맞아도 여기서 다시 본다(둘 다 필요하다)
+    // 파일 ΣN == 적용 학년 정산 T 합 — 학생마다 맞아도 여기서 다시 본다(둘 다 필요하다)
     if out.file_total != out.settlement_total {
         out.file_reasons.push(
             err(code::FILE_TOTAL_MISMATCH).detail(format!("파일 {} · 정산 {}", out.file_total, out.settlement_total)),
         );
     }
     Ok(())
+}
+
+/// 방과후드림 대상 — 정산 학생(`all`) 가운데 적용 학년 학생만. 학년은 통합 매니저 학생 자료의
+/// 숫자 학년으로 가른다(글자 '3학년' 으로 견주지 않는다). 수강 상태는 보지 않는다.
+pub(crate) fn universe(
+    conn: &Connection,
+    all: &HashMap<i64, StudentAmount>,
+    grades: &[i64],
+) -> AppResult<HashMap<i64, StudentAmount>> {
+    let mut out = HashMap::new();
+    for (id, a) in all {
+        let g: Option<i64> = conn
+            .query_row("SELECT grade FROM student WHERE id = ?1", params![id], |r| r.get(0))
+            .optional()?;
+        if g.is_some_and(|g| grades.contains(&g)) {
+            out.insert(*id, a.clone());
+        }
+    }
+    Ok(out)
 }
 
 /// 파일 전체를 맞대어 본다. 읽기만 한다. `key` 는 키가 아직 없으면 None(그러면 아무도
@@ -896,8 +933,17 @@ pub fn run(conn: &Connection, workspace_id: i64, file: &DreamFile, key: Option<&
         absent: Vec::new(),
         file_total: file.rows.iter().filter_map(|r| r.amount_n).sum(),
         settlement_total: 0,
+        applied_grades: workspace_setting::applied_grades(conn, workspace_id)?,
+        universe_students: 0,
+        outside: Vec::new(),
         p4_ready: false,
     };
+
+    // 적용 학년이 정해져야 '누가 파일에 있어야 하는지'가 정해진다
+    if out.applied_grades.is_empty() {
+        out.file_reasons.push(err(code::APPLIED_GRADES_NOT_SET));
+        return Ok(out);
+    }
 
     // 정산이 최신이어야 하고, 한도 기록과도 맞아야 한다
     let fresh: FreshSettlement = match amount::fresh_settlement(conn, workspace_id) {
@@ -977,8 +1023,26 @@ pub fn run(conn: &Connection, workspace_id: i64, file: &DreamFile, key: Option<&
         }
     }
 
-    // 파일 전체 — 정산에 금액이 남은 학생이 모두 있는가, 전체 금액이 같은가
-    check_whole(conn, workspace_id, &amounts, &mut out)?;
+    // 적용 학년이 아닌 학생이 파일에 있으면 — 빼고 계산하지 않고 오류(학년 설정이나 파일이 틀렸다)
+    let mut outside: BTreeMap<i64, usize> = BTreeMap::new();
+    for s in out.students.iter_mut() {
+        let g = file.rows.iter().find(|r| r.source_row == s.key).and_then(|r| r.grade_candidate);
+        if let Some(g) = g.filter(|g| !out.applied_grades.contains(g)) {
+            *outside.entry(g).or_default() += 1;
+            s.reasons.push(err(code::FILE_STUDENT_OUTSIDE_APPLIED_GRADES).detail(format!("{g}학년")));
+            s.state = State::Error;
+        }
+    }
+    if !outside.is_empty() {
+        let detail = outside.iter().map(|(g, n)| format!("{g}학년 {n}명")).collect::<Vec<_>>().join(", ");
+        out.file_reasons.push(err(code::FILE_STUDENT_OUTSIDE_APPLIED_GRADES).detail(detail));
+        out.outside = outside.into_iter().collect();
+    }
+
+    // 파일 전체 — 적용 학년에서 정산 금액이 남은 학생이 모두 있는가, 그 금액 전체가 같은가
+    let target = universe(conn, &amounts, &out.applied_grades)?;
+    out.universe_students = target.values().filter(|a| a.total > 0).count();
+    check_whole(conn, workspace_id, &target, &mut out)?;
 
     out.ready = out.students.iter().filter(|s| s.state == State::Ready).count();
     out.needs_confirmation = out.students.iter().filter(|s| s.state == State::NeedsConfirmation).count();

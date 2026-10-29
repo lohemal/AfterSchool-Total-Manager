@@ -6,7 +6,7 @@
 //! (`settlement_alloc`)의 부서 · 항목별 금액은 보지 않는다 — 학생 총액만 같으면 된다.
 //!
 //! ```text
-//! 줄 차례  방과후드림 부서 순위 → 그 부서의 항목 순위 → 부서 id → 항목 코드 → 행 번호
+//! 줄 차례  방과후드림 부서 순위 → 공통 항목 순위(모든 부서 같음) → 부서 id → 항목 코드 → 행 번호
 //! 줄마다   P = min(N, 남은 V)            V 먼저
 //!          Q = min(N − P, 남은 F)        그다음 F
 //!          O = N − P − Q                 나머지는 개인부담
@@ -16,7 +16,7 @@
 //! 계산이 끝나면 줄마다 `N = O + P + Q`, 학생 전체 `ΣP = V · ΣQ = F · ΣO = personal ·
 //! ΣN = T`, 남은 V · F 가 0 인지 다시 확인한다. 하나라도 어긋나면 결과를 내지 않는다.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::HashSet;
 
 /// 학생의 결제행 하나(검증을 마친 것).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -37,12 +37,13 @@ pub struct Target {
     pub personal: i64,
 }
 
-/// 배분 차례. `depts` 는 부서 id 를 앞선 차례대로, `items` 는 부서마다 항목 코드를 차례대로.
+/// 배분 차례. `depts` 는 부서 id 를 앞선 차례대로, `items` 는 항목 코드를 차례대로 — 항목
+/// 차례는 **모든 부서에 같다**(P6. 실제 업무에서 부서마다 다르게 두지 않는다).
 /// 없는 부서 · 항목은 있는 것 뒤에 온다(그 안에서는 부서 id · 항목 코드 · 행 번호 차례).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Priority {
     pub depts: Vec<i64>,
-    pub items: BTreeMap<i64, Vec<String>>,
+    pub items: Vec<String>,
 }
 
 impl Priority {
@@ -50,23 +51,17 @@ impl Priority {
         self.depts.iter().position(|d| *d == dept).unwrap_or(usize::MAX)
     }
 
-    fn item_rank(&self, dept: i64, item: &str) -> usize {
-        self.items
-            .get(&dept)
-            .and_then(|v| v.iter().position(|i| i == item))
-            .unwrap_or(usize::MAX)
+    fn item_rank(&self, item: &str) -> usize {
+        self.items.iter().position(|i| i == item).unwrap_or(usize::MAX)
     }
 
     /// 차례를 글로 — 차례가 같으면 언제나 같은 글이다. 결과를 무효로 할지 가리는 지문의 재료.
     pub fn canonical(&self) -> String {
-        let mut s = format!(
-            "D:{}",
-            self.depts.iter().map(|d| d.to_string()).collect::<Vec<_>>().join(",")
-        );
-        for (d, items) in &self.items {
-            s.push_str(&format!(";I{d}:{}", items.join(",")));
-        }
-        s
+        format!(
+            "D:{};I:{}",
+            self.depts.iter().map(|d| d.to_string()).collect::<Vec<_>>().join(","),
+            self.items.join(",")
+        )
     }
 }
 
@@ -135,7 +130,7 @@ pub fn order(lines: &[Line], pr: &Priority) -> Vec<usize> {
         let key = |l: &Line| {
             (
                 pr.dept_rank(l.department_id),
-                pr.item_rank(l.department_id, &l.item_code),
+                pr.item_rank(&l.item_code),
                 l.department_id,
                 l.item_code.clone(),
                 l.source_row,
@@ -270,10 +265,9 @@ mod tests {
     }
 
     fn pr(depts: &[i64]) -> Priority {
-        let all = vec![강사료.to_string(), 수용비.into(), 교재비.into(), 재료비.into()];
         Priority {
             depts: depts.to_vec(),
-            items: depts.iter().map(|d| (*d, all.clone())).collect(),
+            items: vec![강사료.to_string(), 수용비.into(), 교재비.into(), 재료비.into()],
         }
     }
 
@@ -345,7 +339,7 @@ mod tests {
             l(5, 공예, 재료비, 28_750),
         ];
         let mut p = pr(&[공예, 로봇]);
-        p.items.insert(공예, vec![재료비.into(), 강사료.into(), 수용비.into(), 교재비.into()]);
+        p.items = vec![재료비.into(), 강사료.into(), 수용비.into(), 교재비.into()];
         let s = allocate(&lines, &tg(100_250, 40_000, 0), &p).unwrap();
         // 공예 재료비 28,750 → 공예 강사료 11,250 → 로봇은 개인부담
         assert_eq!(
@@ -370,25 +364,57 @@ mod tests {
     }
 
     #[test]
-    fn 항목_차례는_부서마다_따로다() {
-        let lines = [
-            l(2, 로봇, 강사료, 10_000),
-            l(3, 로봇, 재료비, 10_000),
-            l(4, 미술, 강사료, 10_000),
-            l(5, 미술, 재료비, 10_000),
-        ];
+    fn 공통_항목_차례는_모든_부서에_같게_적용된다() {
+        // 부서 A(로봇) · B(미술), 공통 재료비 → 강사료 → 수용비 → 교재비
+        let mut lines = Vec::new();
+        let mut row = 2;
+        for d in [미술, 로봇] {
+            for it in [강사료, 수용비, 교재비, 재료비] {
+                lines.push(l(row, d, it, 10_000));
+                row += 1;
+            }
+        }
         let mut p = pr(&[로봇, 미술]);
-        // 미술만 재료비가 먼저
-        p.items.insert(미술, vec![재료비.into(), 강사료.into(), 수용비.into(), 교재비.into()]);
-        let s = allocate(&lines, &tg(40_000, 15_000, 0), &p).unwrap();
-        assert_eq!(opq(&s), vec![(2, 0, 10_000, 0), (3, 5_000, 5_000, 0), (4, 10_000, 0, 0), (5, 10_000, 0, 0)]);
-        // 로봇 차례는 그대로 두고 미술만 바꿔도, 로봇 줄의 차례는 바뀌지 않는다
-        let mut p2 = p.clone();
-        p2.items.insert(미술, vec![강사료.into(), 재료비.into(), 수용비.into(), 교재비.into()]);
-        let s2 = allocate(&lines, &tg(40_000, 35_000, 0), &p2).unwrap();
-        let s1 = allocate(&lines, &tg(40_000, 35_000, 0), &p).unwrap();
-        assert_eq!(&opq(&s1)[..2], &opq(&s2)[..2]);
-        assert_ne!(&opq(&s1)[2..], &opq(&s2)[2..]);
+        p.items = vec![재료비.into(), 강사료.into(), 수용비.into(), 교재비.into()];
+        let s = allocate(&lines, &tg(80_000, 80_000, 0), &p).unwrap();
+        let by_seq = |s: &[Split]| {
+            let mut v: Vec<(u32, i64, String)> = s
+                .iter()
+                .map(|x| {
+                    let ln = lines.iter().find(|y| y.source_row == x.source_row).unwrap();
+                    (x.seq, ln.department_id, ln.item_code.clone())
+                })
+                .collect();
+            v.sort();
+            v.into_iter().map(|(_, d, i)| (d, i)).collect::<Vec<_>>()
+        };
+        let want = |order: [&str; 4]| {
+            [로봇, 미술]
+                .iter()
+                .flat_map(|d| order.iter().map(move |i| (*d, i.to_string())))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(by_seq(&s), want([재료비, 강사료, 수용비, 교재비]));
+        // 공통 차례를 바꾸면 두 부서 모두 바뀐다
+        p.items = vec![교재비.into(), 수용비.into(), 강사료.into(), 재료비.into()];
+        let s2 = allocate(&lines, &tg(80_000, 80_000, 0), &p).unwrap();
+        assert_eq!(by_seq(&s2), want([교재비, 수용비, 강사료, 재료비]));
+        // 이용권이 모자라면 앞선 줄부터 — 로봇 재료비 · 강사료까지만
+        p.items = vec![재료비.into(), 강사료.into(), 수용비.into(), 교재비.into()];
+        let s3 = allocate(&lines, &tg(80_000, 20_000, 0), &p).unwrap();
+        let paid: Vec<(i64, String)> = s3
+            .iter()
+            .filter(|x| x.p > 0)
+            .map(|x| {
+                let ln = lines.iter().find(|y| y.source_row == x.source_row).unwrap();
+                (ln.department_id, ln.item_code.clone())
+            })
+            .collect();
+        let mut paid = paid;
+        paid.sort();
+        let mut exp = vec![(로봇, 재료비.to_string()), (로봇, 강사료.to_string())];
+        exp.sort();
+        assert_eq!(paid, exp);
     }
 
     #[test]
@@ -417,7 +443,7 @@ mod tests {
         let lines = [l(2, 공예, 강사료, 10_000), l(3, 미술, 강사료, 10_000), l(4, 로봇, 강사료, 10_000)];
         let p = Priority {
             depts: vec![미술],
-            items: BTreeMap::new(),
+            items: Vec::new(),
         };
         let s = allocate(&lines, &tg(30_000, 15_000, 0), &p).unwrap();
         // 미술(순위 있음) → 로봇(id 10) → 공예(id 30)
@@ -497,7 +523,7 @@ mod tests {
         assert_eq!(a.canonical(), b.canonical());
         assert_ne!(a.canonical(), pr(&[미술, 로봇]).canonical());
         let mut c = a.clone();
-        c.items.insert(로봇, vec![수용비.into(), 강사료.into(), 교재비.into(), 재료비.into()]);
+        c.items = vec![수용비.into(), 강사료.into(), 교재비.into(), 재료비.into()];
         assert_ne!(a.canonical(), c.canonical());
     }
 }

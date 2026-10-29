@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import type { DreamExport, DreamIssue } from '@/ipc/types'
+import type { DreamCourseMatch, DreamExport, DreamIssue, DreamSuggestion } from '@/ipc/types'
 
 import {
   allocIssueText,
@@ -8,6 +8,10 @@ import {
   demoteExport,
   DREAM_HEADERS,
   exportView,
+  gradesLabel,
+  sameGrades,
+  defaultCoursePick,
+  coursePicksToSave,
   issueText,
   matchStateLabel,
   monthCode,
@@ -168,5 +172,71 @@ describe('결과 파일 표시 — 지금 결과인가, 이전 결과인가', ()
     // 날짜를 되돌리면 배분이 그대로이므로 그 파일이 다시 지금 결과다
     expect(exportView(m, done('f1'), '20261030')).toBe('CURRENT')
     expect(demoteExport(null)).toBeNull()
+  })
+})
+
+describe('적용 학년 · 강좌코드 일괄 연결 (P6)', () => {
+  it('학년 표시와 집합 비교', () => {
+    expect(gradesLabel([4, 3])).toBe('3학년 · 4학년')
+    expect(gradesLabel([])).toBe('미설정')
+    expect(sameGrades([3, 4], [4, 3, 3])).toBe(true)
+    expect(sameGrades([3], [3, 4])).toBe(false)
+  })
+
+  it('적용 학년 문장', () => {
+    expect(reasonText({ code: 'APPLIED_GRADES_NOT_SET', state: 'ERROR', row: null, detail: null })).toBe(
+      '방과후드림 적용 학년을 1개 이상 선택해 주세요.',
+    )
+    expect(
+      reasonText({ code: 'FILE_STUDENT_OUTSIDE_APPLIED_GRADES', state: 'ERROR', row: null, detail: '4학년 1명' }),
+    ).toBe('선택한 적용 학년에 포함되지 않는 학생이 결제파일에 있습니다(4학년 1명). 적용 학년 또는 결제파일을 확인해 주세요.')
+    expect(allocIssueText({ code: 'ITEM_ORDER_NOT_CONFIRMED', row: null, detail: null })).toContain('[항목 차례 저장]')
+  })
+
+  const course = (o: Partial<DreamCourseMatch>): DreamCourseMatch => ({
+    courseCode: 'C1',
+    courseNames: ['로봇과학A'],
+    departmentId: null,
+    deptLabel: null,
+    state: 'NEEDS_CONFIRMATION',
+    reasons: [],
+    suggestions: [],
+    previous: null,
+    rows: 4,
+    ...o,
+  })
+  const sug = (id: number, why: DreamSuggestion['why'], taken = false): DreamSuggestion => ({
+    departmentId: id,
+    label: `부서${id}`,
+    why,
+    taken,
+  })
+
+  it('기본 선택은 확실한 추천이 하나일 때만', () => {
+    expect(defaultCoursePick(course({ departmentId: 7 }))).toBe(7)
+    expect(defaultCoursePick(course({ suggestions: [sug(1, ['SAME_NAME', 'STUDENT_ENROLLED'])] }))).toBe(1)
+    expect(defaultCoursePick(course({ suggestions: [sug(2, ['PREVIOUS_WORKSPACE'])] }))).toBe(2)
+    // 학생이 듣는 부서라는 근거만으로는 고르지 않는다
+    expect(defaultCoursePick(course({ suggestions: [sug(3, ['STUDENT_ENROLLED'])] }))).toBeNull()
+    // 둘이면 고르지 않는다, 다른 코드에 이어진 부서도
+    expect(defaultCoursePick(course({ suggestions: [sug(1, ['SAME_NAME']), sug(2, ['SAME_NAME'])] }))).toBeNull()
+    expect(defaultCoursePick(course({ suggestions: [sug(1, ['SAME_NAME'], true)] }))).toBeNull()
+  })
+
+  it('저장할 것은 지금 연결과 다른 행만', () => {
+    const cs = [
+      course({ courseCode: 'A', suggestions: [sug(1, ['SAME_NAME'])] }),
+      course({ courseCode: 'B', departmentId: 2 }),
+      course({ courseCode: 'C', suggestions: [sug(3, ['STUDENT_ENROLLED'])] }),
+      course({ courseCode: 'D', departmentId: 4 }),
+    ]
+    // A 는 기본값, B 는 그대로, C 는 직접 고름, D 는 다른 부서로 바꿈
+    expect(coursePicksToSave(cs, { C: 3, D: 5 })).toEqual([
+      ['A', 1],
+      ['C', 3],
+      ['D', 5],
+    ])
+    // A 를 '부서 선택'으로 되돌리면 빠진다
+    expect(coursePicksToSave(cs, { A: null })).toEqual([])
   })
 })
